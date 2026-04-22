@@ -3,16 +3,25 @@ from sqlmodel import Session, select
 from execqueue.models.requirement import Requirement
 from execqueue.models.work_package import WorkPackage
 from execqueue.models.task import Task
+from execqueue.runtime import apply_test_label, is_test_mode
 
 
 def enqueue_requirement(requirement_id: int, session: Session) -> list[Task]:
-    requirement = session.get(Requirement, requirement_id)
+    requirement = session.exec(
+        select(Requirement).where(
+            Requirement.id == requirement_id,
+            Requirement.is_test == is_test_mode(),
+        )
+    ).first()
     if not requirement:
         raise ValueError("Requirement not found")
 
     work_packages = session.exec(
         select(WorkPackage)
-        .where(WorkPackage.requirement_id == requirement_id)
+        .where(
+            WorkPackage.requirement_id == requirement_id,
+            WorkPackage.is_test == requirement.is_test,
+        )
         .order_by(WorkPackage.execution_order, WorkPackage.id)
     ).all()
 
@@ -26,11 +35,12 @@ def enqueue_requirement(requirement_id: int, session: Session) -> list[Task]:
             task = Task(
                 source_type="work_package",
                 source_id=wp.id,
-                title=wp.title,
+                title=apply_test_label(wp.title),
                 prompt=prompt,
                 verification_prompt=verification_prompt,
                 execution_order=wp.execution_order,
                 status="queued",
+                is_test=requirement.is_test,
             )
             session.add(task)
             created_tasks.append(task)
@@ -41,11 +51,12 @@ def enqueue_requirement(requirement_id: int, session: Session) -> list[Task]:
         task = Task(
             source_type="requirement",
             source_id=requirement.id,
-            title=requirement.title,
+            title=apply_test_label(requirement.title),
             prompt=prompt,
             verification_prompt=verification_prompt,
             execution_order=0,
             status="queued",
+            is_test=requirement.is_test,
         )
         session.add(task)
         created_tasks.append(task)

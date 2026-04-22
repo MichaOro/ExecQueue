@@ -1,7 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session
 
 from execqueue.main import app
 from execqueue.db.engine import get_session
@@ -11,24 +10,6 @@ from execqueue.db.engine import get_session
 def client() -> TestClient:
     """FastAPI TestClient for API tests."""
     return TestClient(app)
-
-
-@pytest.fixture
-def db_session():
-    """In-memory SQLite session with StaticPool for isolated API tests.
-    
-    Each test gets a fresh database state with proper teardown (rollback).
-    """
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine)
-
-    with Session(engine) as session:
-        yield session
-        session.rollback()
 
 
 @pytest.fixture

@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 
 from execqueue.db.engine import get_session
 from execqueue.models.task import Task
+from execqueue.runtime import apply_test_label, is_test_mode
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -20,7 +21,12 @@ class TaskCreate(BaseModel):
 
 @router.get("/")
 def get_tasks(session: Session = Depends(get_session)):
-    return session.exec(select(Task).order_by(Task.execution_order, Task.id)).all()
+    statement = (
+        select(Task)
+        .where(Task.is_test == is_test_mode())
+        .order_by(Task.execution_order, Task.id)
+    )
+    return session.exec(statement).all()
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
@@ -28,11 +34,12 @@ def create_task(payload: TaskCreate, session: Session = Depends(get_session)):
     task = Task(
         source_type=payload.source_type,
         source_id=payload.source_id,
-        title=payload.title,
+        title=apply_test_label(payload.title),
         prompt=payload.prompt,
         verification_prompt=payload.verification_prompt,
         execution_order=payload.execution_order,
         max_retries=payload.max_retries,
+        is_test=is_test_mode(),
     )
     session.add(task)
     session.commit()

@@ -1,25 +1,96 @@
 import os
-import pytest
+from pathlib import Path
 from typing import Generator, Any
-from unittest.mock import MagicMock, patch
-from sqlmodel import SQLModel, Session, create_engine
-from sqlalchemy import event
+from unittest.mock import MagicMock
 
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
-TEST_QUEUE_PREFIX = os.getenv("TEST_QUEUE_PREFIX", "test_")
+import pytest
+from dotenv import dotenv_values
+from sqlmodel import SQLModel, Session, create_engine
+
+DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+DOTENV_VALUES = dotenv_values(DOTENV_PATH) if DOTENV_PATH.exists() else {}
+
+TEST_DATABASE_URL = (
+    os.getenv("TEST_DATABASE_URL")
+    or os.getenv("DATABASE_URL")
+    or DOTENV_VALUES.get("TEST_DATABASE_URL")
+    or DOTENV_VALUES.get("DATABASE_URL")
+)
+TEST_QUEUE_PREFIX = (
+    os.getenv("TEST_QUEUE_PREFIX")
+    or DOTENV_VALUES.get("TEST_QUEUE_PREFIX")
+    or "test_"
+)
 TEST_ID_START = 9000
+SQLITE_FALLBACK_URL = "sqlite:///:memory:"
+HAS_CONFIGURED_TEST_DB = bool(TEST_DATABASE_URL)
+DB_REQUIRED_FIXTURES = {
+    "db_session",
+    "test_engine",
+    "session_scope",
+    "api_client",
+    "e2e_client",
+    "session_with_data",
+    "sample_requirement",
+    "sample_work_package",
+    "sample_task",
+    "sample_task_queue",
+}
+
+if TEST_DATABASE_URL:
+    os.environ.setdefault("DATABASE_URL", TEST_DATABASE_URL)
+    os.environ.setdefault("TEST_DATABASE_URL", TEST_DATABASE_URL)
+else:
+    # Keep imports working even when DB-backed tests are skipped.
+    os.environ.setdefault("DATABASE_URL", SQLITE_FALLBACK_URL)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "requires_db: test needs a configured external database connection",
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    if HAS_CONFIGURED_TEST_DB:
+        return
+
+    skip_marker = pytest.mark.skip(
+        reason="requires configured TEST_DATABASE_URL or DATABASE_URL"
+    )
+
+    for item in items:
+        if DB_REQUIRED_FIXTURES.intersection(item.fixturenames):
+            item.add_marker(pytest.mark.requires_db)
+            item.add_marker(skip_marker)
 
 
 @pytest.fixture(scope="session")
 def test_engine() -> Any:
-    """Create a test engine using PostgreSQL for real E2E tests."""
+    """Create a test engine only when a real test DB is configured."""
+    if not TEST_DATABASE_URL:
+        pytest.skip("requires configured TEST_DATABASE_URL or DATABASE_URL")
+
+    engine_kwargs: dict[str, Any] = {"echo": False}
+
+    if "neon.tech" in TEST_DATABASE_URL:
+        engine_kwargs["connect_args"] = {"sslmode": "require"}
+
     engine = create_engine(
         TEST_DATABASE_URL,
-        echo=False,
-        connect_args={"sslmode": "require"} if "neon.tech" in TEST_DATABASE_URL else {},
+        **engine_kwargs,
     )
     SQLModel.metadata.create_all(engine)
     return engine
+
+
+@pytest.fixture(autouse=True)
+def enable_test_queue_mode(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("EXECQUEUE_TEST_MODE", "true")
+    monkeypatch.setenv("TEST_QUEUE_PREFIX", TEST_QUEUE_PREFIX)
 
 
 @pytest.fixture
@@ -27,7 +98,7 @@ def db_session(test_engine: Any) -> Generator[Session, None, None]:
     """Function-scoped session with automatic rollback and cleanup after each test.
     
     Provides isolated tests - each test gets a clean state.
-    All data is cleaned up after each test (table truncate).
+    Only deletes test data (is_test=True) to preserve production data.
     """
     from sqlmodel import delete
     from execqueue.models.requirement import Requirement
@@ -35,9 +106,9 @@ def db_session(test_engine: Any) -> Generator[Session, None, None]:
     from execqueue.models.task import Task
 
     with Session(test_engine) as session:
-        session.exec(delete(WorkPackage))
-        session.exec(delete(Task))
-        session.exec(delete(Requirement))
+        session.exec(delete(WorkPackage).where(WorkPackage.is_test == True))
+        session.exec(delete(Task).where(Task.is_test == True))
+        session.exec(delete(Requirement).where(Requirement.is_test == True))
         session.commit()
         
         yield session
@@ -50,6 +121,7 @@ def session_scope(test_engine: Any) -> Generator[Session, None, None]:
     
     Faster than function-scoped but less isolated.
     Use when tests within a file can share state.
+    Only deletes test data (is_test=True) to preserve production data.
     """
     from sqlmodel import delete
     from execqueue.models.requirement import Requirement
@@ -57,9 +129,9 @@ def session_scope(test_engine: Any) -> Generator[Session, None, None]:
     from execqueue.models.task import Task
 
     with Session(test_engine) as session:
-        session.exec(delete(WorkPackage))
-        session.exec(delete(Task))
-        session.exec(delete(Requirement))
+        session.exec(delete(WorkPackage).where(WorkPackage.is_test == True))
+        session.exec(delete(Task).where(Task.is_test == True))
+        session.exec(delete(Requirement).where(Requirement.is_test == True))
         session.commit()
         
         yield session
@@ -120,18 +192,19 @@ def sample_requirement(db_session: Session) -> Any:
 
 @pytest.fixture
 def sample_work_package(db_session: Session, sample_requirement: Any) -> Any:
-    """Create a sample WorkPackage linked to a requirement with test ID range."""
+    """Create a WorkPackage linked to a requirement marked as test data."""
     from execqueue.models.work_package import WorkPackage
 
     work_package = WorkPackage(
         id=TEST_ID_START + 10,
         requirement_id=sample_requirement.id,
-        title="Sample Work Package",
+        title=f"{TEST_QUEUE_PREFIX}Sample Work Package",
         description="This is a test work package",
         status="backlog",
         execution_order=1,
         implementation_prompt="Implement this feature",
         verification_prompt="Verify the implementation",
+        is_test=True,
     )
     db_session.add(work_package)
     db_session.commit()
@@ -141,20 +214,21 @@ def sample_work_package(db_session: Session, sample_requirement: Any) -> Any:
 
 @pytest.fixture
 def sample_task(db_session: Session, sample_work_package: Any) -> Any:
-    """Create a sample Task with all relevant fields and test ID range."""
+    """Create a Task marked as test data."""
     from execqueue.models.task import Task
 
     task = Task(
         id=TEST_ID_START + 20,
         source_type="work_package",
         source_id=sample_work_package.id,
-        title="Sample Task",
+        title=f"{TEST_QUEUE_PREFIX}Sample Task",
         prompt="Implement the sample work package",
         verification_prompt="Verify the implementation",
         status="queued",
         execution_order=1,
         retry_count=0,
         max_retries=5,
+        is_test=True,
     )
     db_session.add(task)
     db_session.commit()
@@ -164,10 +238,7 @@ def sample_task(db_session: Session, sample_work_package: Any) -> Any:
 
 @pytest.fixture
 def sample_task_queue(db_session: Session, sample_requirement: Any) -> list[Any]:
-    """Create multiple Tasks with different execution_order values and test ID range.
-    
-    Returns a list of created tasks sorted by execution_order.
-    """
+    """Create multiple Tasks marked as test data."""
     from execqueue.models.task import Task
 
     tasks = []
@@ -176,12 +247,13 @@ def sample_task_queue(db_session: Session, sample_requirement: Any) -> list[Any]
             id=TEST_ID_START + 30 + i,
             source_type="requirement",
             source_id=sample_requirement.id,
-            title=f"Task {i + 1}",
+            title=f"{TEST_QUEUE_PREFIX}Task {i + 1}",
             prompt=f"Prompt for task {i + 1}",
             status="queued",
             execution_order=order,
             retry_count=0,
             max_retries=5,
+            is_test=True,
         )
         db_session.add(task)
         tasks.append(task)

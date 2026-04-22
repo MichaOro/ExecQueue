@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 from execqueue.models.requirement import Requirement
 from execqueue.models.task import Task
 from execqueue.models.work_package import WorkPackage
+from execqueue.runtime import is_test_mode
 from execqueue.validation.task_validator import validate_task_result
 from execqueue.workers.opencode_adapter import execute_with_opencode
 
@@ -19,7 +20,10 @@ def utcnow() -> datetime:
 def get_next_queued_task(session: Session) -> Optional[Task]:
     statement = (
         select(Task)
-        .where(Task.status == "queued")
+        .where(
+            Task.status == "queued",
+            Task.is_test == is_test_mode(),
+        )
         .order_by(Task.execution_order, Task.id)
     )
     return session.exec(statement).first()

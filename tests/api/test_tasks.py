@@ -3,6 +3,7 @@ from sqlmodel import select
 
 from execqueue.models.task import Task
 from execqueue.models.work_package import WorkPackage
+from tests.conftest import TEST_QUEUE_PREFIX
 
 
 class TestTasksAPI:
@@ -33,7 +34,7 @@ class TestTasksAPI:
 
         assert response.status_code == 201
         data = response.json()
-        assert data["title"] == "Test Task"
+        assert data["title"] == f"{TEST_QUEUE_PREFIX}Test Task"
         assert data["source_type"] == "work_package"
         assert data["status"] == "queued"
         assert "id" in data
@@ -61,7 +62,7 @@ class TestTasksAPI:
 
         assert response.status_code == 201
         data = response.json()
-        assert data["title"] == "Minimal Task"
+        assert data["title"] == f"{TEST_QUEUE_PREFIX}Minimal Task"
         assert data["execution_order"] == 0
         assert data["max_retries"] == 5
         assert data["status"] == "queued"

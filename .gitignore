@@ -45,3 +45,4 @@ dist/
 # Project-specific
 diff2.config.json
 .env
+opencode.json

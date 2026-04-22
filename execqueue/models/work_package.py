@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 
 from sqlmodel import SQLModel, Field
 
+from execqueue.runtime import is_test_mode
+
 
 class WorkPackage(SQLModel, table=True):
     __tablename__ = "work_packages"
@@ -22,7 +24,7 @@ class WorkPackage(SQLModel, table=True):
 
     verification_prompt: Optional[str] = None
 
-    is_test: bool = Field(default=False, index=True)
+    is_test: bool = Field(default_factory=is_test_mode, index=True)
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

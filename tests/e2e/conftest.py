@@ -1,28 +1,16 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+from sqlmodel import Session
 
 from execqueue.main import app
 from execqueue.db.engine import get_session
 
 
 @pytest.fixture
-def e2e_client():
-    """E2E TestClient with fresh in-memory database per test.
-    
-    Function scope ensures each test gets a completely fresh database.
-    Uses StaticPool to share in-memory DB with FastAPI dependency overrides.
-    """
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SQLModel.metadata.create_all(engine)
-
+def e2e_client(test_engine, db_session):
+    """E2E TestClient backed by the configured test database."""
     def override_get_session():
-        with Session(engine) as session:
+        with Session(test_engine) as session:
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
