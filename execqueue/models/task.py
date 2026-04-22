@@ -4,23 +4,24 @@ from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field
 
 
-class WorkPackage(SQLModel, table=True):
-    __tablename__ = "work_packages"
+class Task(SQLModel, table=True):
+    __tablename__ = "tasks"
 
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    requirement_id: int = Field(foreign_key="requirement.id", index=True)
+    source_type: str = Field(index=True)  # "requirement" | "work_package"
+    source_id: int = Field(index=True)
 
     title: str
-    description: str
-
-    status: str = Field(default="backlog", index=True)
-
-    execution_order: int = Field(default=0, index=True)
-
-    implementation_prompt: Optional[str] = None
-
+    prompt: str
     verification_prompt: Optional[str] = None
+
+    status: str = Field(default="queued", index=True)
+    execution_order: int = Field(default=0, index=True)
+    retry_count: int = Field(default=0)
+    max_retries: int = Field(default=5)
+
+    last_result: Optional[str] = None
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
