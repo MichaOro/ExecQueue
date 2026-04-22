@@ -9,7 +9,11 @@ from execqueue.db.engine import get_session
 
 @pytest.fixture
 def e2e_client():
-    """E2E TestClient with fresh in-memory database."""
+    """E2E TestClient with fresh in-memory database per test.
+    
+    Function scope ensures each test gets a completely fresh database.
+    Uses StaticPool to share in-memory DB with FastAPI dependency overrides.
+    """
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -27,12 +31,6 @@ def e2e_client():
         yield client
 
     app.dependency_overrides.clear()
-
-
-@pytest.fixture
-def clean_db(e2e_client):
-    """Ensure clean database state before each E2E test."""
-    yield
 
 
 def mock_opencode_done():

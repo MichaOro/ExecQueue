@@ -1,5 +1,8 @@
 import pytest
+from sqlmodel import select
+
 from execqueue.models.task import Task
+from execqueue.models.work_package import WorkPackage
 
 
 class TestTasksAPI:
@@ -14,23 +17,17 @@ class TestTasksAPI:
 
     def test_post_task(self, api_client, session_with_data):
         """Test: POST /tasks creates a task."""
+        wp_id = session_with_data.exec(select(WorkPackage.id).limit(1)).first()
+
         payload = {
             "source_type": "work_package",
-            "source_id": session_with_data.exec(
-                "SELECT id FROM work_package LIMIT 1"
-            ).first(),
+            "source_id": wp_id,
             "title": "Test Task",
             "prompt": "Test prompt",
             "verification_prompt": "Verify this",
             "execution_order": 1,
             "max_retries": 5,
         }
-
-        from sqlmodel import select
-        wp_id = session_with_data.exec(
-            "SELECT id FROM work_package LIMIT 1"
-        ).first()
-        payload["source_id"] = wp_id
 
         response = api_client.post("/tasks", json=payload)
 
@@ -51,10 +48,7 @@ class TestTasksAPI:
 
     def test_post_task_minimal_payload(self, api_client, session_with_data):
         """Test: POST /tasks with minimal required fields."""
-        from sqlmodel import select
-        wp_id = session_with_data.exec(
-            "SELECT id FROM work_package LIMIT 1"
-        ).first()
+        wp_id = session_with_data.exec(select(WorkPackage.id).limit(1)).first()
 
         payload = {
             "source_type": "work_package",
@@ -74,7 +68,6 @@ class TestTasksAPI:
 
     def test_post_task_start(self, api_client, session_with_data):
         """Test: POST /tasks/{id}/start changes status to in_progress."""
-        from sqlmodel import select
         task = session_with_data.exec(select(Task).limit(1)).first()
 
         response = api_client.post(f"/tasks/{task.id}/start")
@@ -91,7 +84,6 @@ class TestTasksAPI:
 
     def test_post_task_done(self, api_client, session_with_data):
         """Test: POST /tasks/{id}/done changes status to done."""
-        from sqlmodel import select
         task = session_with_data.exec(select(Task).limit(1)).first()
 
         response = api_client.post(f"/tasks/{task.id}/done")
@@ -108,7 +100,6 @@ class TestTasksAPI:
 
     def test_post_task_fail(self, api_client, session_with_data):
         """Test: POST /tasks/{id}/fail changes status to failed."""
-        from sqlmodel import select
         task = session_with_data.exec(select(Task).limit(1)).first()
 
         response = api_client.post(f"/tasks/{task.id}/fail?result=Error occurred")

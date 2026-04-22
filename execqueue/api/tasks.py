@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -23,7 +23,7 @@ def get_tasks(session: Session = Depends(get_session)):
     return session.exec(select(Task).order_by(Task.execution_order, Task.id)).all()
 
 
-@router.post("/")
+@router.post("/", status_code=status.HTTP_201_CREATED)
 def create_task(payload: TaskCreate, session: Session = Depends(get_session)):
     task = Task(
         source_type=payload.source_type,

@@ -11,5 +11,6 @@ class Requirement(SQLModel, table=True):
     markdown_content: str
     verification_prompt: Optional[str] = None
     status: str = "backlog"
+    is_test: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

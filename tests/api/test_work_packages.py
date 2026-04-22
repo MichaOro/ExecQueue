@@ -1,4 +1,6 @@
 import pytest
+from sqlmodel import select
+
 from execqueue.models.requirement import Requirement
 from execqueue.models.work_package import WorkPackage
 
@@ -15,23 +17,15 @@ class TestWorkPackagesAPI:
 
     def test_post_work_package(self, api_client, session_with_data):
         """Test: POST /work-packages creates a work package."""
-        req = session_with_data.exec(
-            "SELECT * FROM requirement WHERE title = 'Test Requirement'"
-        ).first()
+        req_id = session_with_data.exec(select(Requirement.id).limit(1)).first()
 
         payload = {
-            "requirement_id": session_with_data.exec(
-                "SELECT id FROM requirement LIMIT 1"
-            ).first(),
+            "requirement_id": req_id,
             "title": "New Work Package",
             "description": "New WP description",
             "execution_order": 2,
             "status": "backlog",
         }
-
-        from sqlmodel import select
-        req_id = session_with_data.exec(select(Requirement).limit(1)).first().id
-        payload["requirement_id"] = req_id
 
         response = api_client.post("/work-packages", json=payload)
 
@@ -51,8 +45,7 @@ class TestWorkPackagesAPI:
 
     def test_post_work_package_minimal_payload(self, api_client, session_with_data):
         """Test: POST /work-packages with minimal required fields."""
-        from sqlmodel import select
-        req_id = session_with_data.exec(select(Requirement).limit(1)).first().id
+        req_id = session_with_data.exec(select(Requirement.id).limit(1)).first()
 
         payload = {
             "requirement_id": req_id,
@@ -70,8 +63,7 @@ class TestWorkPackagesAPI:
 
     def test_post_work_package_with_verification_prompt(self, api_client, session_with_data):
         """Test: POST /work-packages with optional verification_prompt."""
-        from sqlmodel import select
-        req_id = session_with_data.exec(select(Requirement).limit(1)).first().id
+        req_id = session_with_data.exec(select(Requirement.id).limit(1)).first()
 
         payload = {
             "requirement_id": req_id,

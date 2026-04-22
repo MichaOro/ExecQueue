@@ -5,93 +5,18 @@ from unittest.mock import MagicMock, patch
 from sqlmodel import SQLModel, Session, create_engine
 from sqlalchemy import event
 
-# Test database URL - uses SQLite file for persistence
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///./test.db")
-
-# Test ID range - IDs >= 9000 are reserved for tests
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:")
+TEST_QUEUE_PREFIX = os.getenv("TEST_QUEUE_PREFIX", "test_")
 TEST_ID_START = 9000
 
 
 @pytest.fixture(scope="session")
 def test_engine() -> Any:
-    """Create a separate engine for tests using SQLite file."""
+    """Create a test engine using PostgreSQL for real E2E tests."""
     engine = create_engine(
         TEST_DATABASE_URL,
         echo=False,
-        connect_args={"check_same_thread": False},
-    )
-    return engine
-
-
-@pytest.fixture(scope="session", autouse=True)
-def create_test_db_tables(test_engine: Any) -> None:
-    """Create all database tables before test session starts."""
-    SQLModel.metadata.create_all(test_engine)
-
-
-@pytest.fixture
-def db_session(test_engine: Any) -> Generator[Session, None, None]:
-    """Function-scoped session with automatic rollback and cleanup after each test.
-    
-    Provides isolated tests - each test gets a clean state.
-    All data is cleaned up after each test (table truncate).
-    """
-    from sqlmodel import delete
-    from execqueue.models.requirement import Requirement
-    from execqueue.models.work_package import WorkPackage
-    from execqueue.models.task import Task
-
-    # Clean all tables before test
-    with Session(test_engine) as cleanup_session:
-        cleanup_session.exec(delete(WorkPackage))
-        cleanup_session.exec(delete(Task))
-        cleanup_session.exec(delete(Requirement))
-        cleanup_session.commit()
-
-    with Session(test_engine) as session:
-        yield session
-        session.rollback()
-
-
-@pytest.fixture
-def session_scope(test_engine: Any) -> Generator[Session, None, None]:
-    """Session-scoped transaction with rollback.
-    
-    Faster than function-scoped but less isolated.
-    Use when tests within a file can share state.
-    """
-    from sqlmodel import delete
-    from execqueue.models.requirement import Requirement
-    from execqueue.models.work_package import WorkPackage
-    from execqueue.models.task import Task
-
-    # Clean all tables before test
-    with Session(test_engine) as cleanup_session:
-        cleanup_session.exec(delete(WorkPackage))
-        cleanup_session.exec(delete(Task))
-        cleanup_session.exec(delete(Requirement))
-        cleanup_session.commit()
-
-    with Session(test_engine) as session:
-        yield session
-        session.rollback()
-
-        yield
-
-        # Optional: Clean up after test as well
-        session.exec(delete(WorkPackage).where(WorkPackage.id >= TEST_ID_START))
-        session.exec(delete(Task).where(Task.id >= TEST_ID_START))
-        session.exec(delete(Requirement).where(Requirement.id >= TEST_ID_START))
-        session.commit()
-
-
-@pytest.fixture(scope="session")
-def test_engine_in_memory() -> Any:
-    """Create an in-memory SQLite engine for isolated tests."""
-    engine = create_engine(
-        "sqlite:///:memory:",
-        echo=True,
-        connect_args={"check_same_thread": False},
+        connect_args={"sslmode": "require"} if "neon.tech" in TEST_DATABASE_URL else {},
     )
     SQLModel.metadata.create_all(engine)
     return engine
@@ -104,19 +29,17 @@ def db_session(test_engine: Any) -> Generator[Session, None, None]:
     Provides isolated tests - each test gets a clean state.
     All data is cleaned up after each test (table truncate).
     """
-    from sqlmodel import select, delete
+    from sqlmodel import delete
     from execqueue.models.requirement import Requirement
     from execqueue.models.work_package import WorkPackage
     from execqueue.models.task import Task
 
-    # Clean all tables before test
-    with Session(test_engine) as cleanup_session:
-        cleanup_session.exec(delete(WorkPackage))
-        cleanup_session.exec(delete(Task))
-        cleanup_session.exec(delete(Requirement))
-        cleanup_session.commit()
-
     with Session(test_engine) as session:
+        session.exec(delete(WorkPackage))
+        session.exec(delete(Task))
+        session.exec(delete(Requirement))
+        session.commit()
+        
         yield session
         session.rollback()
 
@@ -133,21 +56,15 @@ def session_scope(test_engine: Any) -> Generator[Session, None, None]:
     from execqueue.models.work_package import WorkPackage
     from execqueue.models.task import Task
 
-    # Clean all tables before test
-    with Session(test_engine) as cleanup_session:
-        cleanup_session.exec(delete(WorkPackage))
-        cleanup_session.exec(delete(Task))
-        cleanup_session.exec(delete(Requirement))
-        cleanup_session.commit()
-
     with Session(test_engine) as session:
+        session.exec(delete(WorkPackage))
+        session.exec(delete(Task))
+        session.exec(delete(Requirement))
+        session.commit()
+        
         yield session
         session.rollback()
 
-
-# ============================================================================
-# OpenCode Mock Fixtures
-# ============================================================================
 
 @pytest.fixture
 def mock_opencode_success() -> MagicMock:
@@ -181,22 +98,19 @@ def mock_opencode_flaky() -> MagicMock:
     return mock
 
 
-# ============================================================================
-# Test Data Fixtures
-# ============================================================================
-
 @pytest.fixture
 def sample_requirement(db_session: Session) -> Any:
-    """Create a sample Requirement in the test database with test ID range."""
+    """Create a Requirement in the test database marked as test data."""
     from execqueue.models.requirement import Requirement
 
     requirement = Requirement(
         id=TEST_ID_START + 1,
-        title="Sample Requirement",
+        title=f"{TEST_QUEUE_PREFIX}Sample Requirement",
         description="This is a test requirement",
         markdown_content="# Sample Requirement\n\nTest content",
         verification_prompt=None,
         status="backlog",
+        is_test=True,
     )
     db_session.add(requirement)
     db_session.commit()

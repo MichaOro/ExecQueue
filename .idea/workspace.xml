@@ -5,43 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="d94e45f2-c5c9-4cce-aa63-30a3a4443a8f" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/execqueue/api/queue.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/api/runner.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/api/tasks.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/models/task.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/scheduler/runner.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/services/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/services/queue_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/validation/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/validation/task_validator.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/execqueue/workers/opencode_adapter.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pytest.ini" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/requirements-test.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test.db" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/api/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/api/conftest.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/api/test_queue.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/api/test_requirements.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/api/test_runner.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/api/test_tasks.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/api/test_work_packages.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/conftest.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/e2e/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/e2e/conftest.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/e2e/test_epic_with_workpackages.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/e2e/test_epic_without_workpackages.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/integration/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/integration/test_runner.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/integration/test_task_lifecycle.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/unit/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/unit/test_opencode_adapter.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/unit/test_queue_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/unit/test_task_validator.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/execqueue/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/execqueue/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/execqueue/models/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/execqueue/models/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/execqueue/models/requirement.py" beforeDir="false" afterPath="$PROJECT_DIR$/execqueue/models/requirement.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/api/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/api/conftest.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/conftest.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/e2e/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/e2e/conftest.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

@@ -50,7 +50,19 @@ class TestRunNextTask:
         db_session.add(sample_task)
         db_session.commit()
 
-        result = run_next_task(db_session)
+        with patch(
+            "execqueue.scheduler.runner.execute_with_opencode",
+            return_value=type(
+                "MockResult",
+                (),
+                {
+                    "status": "completed",
+                    "raw_output": '{"status": "not_done", "summary": "Failed"}',
+                    "summary": "Failed",
+                },
+            )(),
+        ):
+            result = run_next_task(db_session)
 
         assert result is not None
         assert result.status == "failed"

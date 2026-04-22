@@ -15,7 +15,10 @@ def client() -> TestClient:
 
 @pytest.fixture
 def db_session():
-    """In-memory SQLite session for isolated API tests."""
+    """In-memory SQLite session with StaticPool for isolated API tests.
+    
+    Each test gets a fresh database state with proper teardown (rollback).
+    """
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -25,6 +28,7 @@ def db_session():
 
     with Session(engine) as session:
         yield session
+        session.rollback()
 
 
 @pytest.fixture
@@ -41,18 +45,6 @@ def api_client(db_session: Session):
     app.dependency_overrides.clear()
 
 
-@pytest.fixture(autouse=True)
-def cleanup_before_test(db_session: Session):
-    """Automatically clean database before each test."""
-    from sqlmodel import delete
-    from execqueue.models.requirement import Requirement
-    from execqueue.models.work_package import WorkPackage
-    from execqueue.models.task import Task
-
-    db_session.exec(delete(WorkPackage))
-    db_session.exec(delete(Task))
-    db_session.exec(delete(Requirement))
-    db_session.commit()
 
 
 @pytest.fixture
@@ -91,6 +83,7 @@ def session_with_data(db_session: Session):
         title="Test Task",
         prompt="Test prompt",
         execution_order=1,
+        status="backlog",
     )
     db_session.add(task)
     db_session.commit()

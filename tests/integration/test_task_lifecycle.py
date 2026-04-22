@@ -115,7 +115,11 @@ class TestTaskLifecycle:
         db_session.add(sample_task)
         db_session.commit()
 
-        result = run_next_task(db_session)
+        with patch(
+            "execqueue.scheduler.runner.execute_with_opencode",
+            return_value=_mock_opencode_not_done(),
+        ):
+            result = run_next_task(db_session)
 
         assert result.status == "failed"
         assert result.retry_count == sample_task.max_retries
