@@ -45,4 +45,7 @@ dist/
 # Project-specific
 diff2.config.json
 .env
+AGENTS.md
 opencode.json
+/migrations
+/requirements
