@@ -18,15 +18,32 @@ from execqueue.runtime import (
     get_scheduler_backoff_max_delay,
     get_worker_instance_id,
     get_worker_lock_timeout_seconds,
+    get_opencode_session_timeout,
 )
 from execqueue.validation.task_validator import validate_task_result
-from execqueue.workers.opencode_adapter import execute_with_opencode
+from execqueue.workers.opencode_adapter import execute_with_opencode, OpenCodeACPClient
+from execqueue.services.opencode_session_service import OpenCodeSessionService
 from execqueue.api import metrics
 
 logger = logging.getLogger(__name__)
 
 # Global worker instance ID
 WORKER_INSTANCE_ID = get_worker_instance_id()
+
+# Global ACP client and session service (lazy initialization)
+_acp_client: OpenCodeACPClient | None = None
+_session_service: OpenCodeSessionService | None = None
+
+
+def _get_session_service() -> OpenCodeSessionService:
+    """Get or create session service (singleton pattern)."""
+    global _acp_client, _session_service
+    
+    if _session_service is None:
+        _acp_client = OpenCodeACPClient()
+        _session_service = OpenCodeSessionService(acp_client=_acp_client)
+    
+    return _session_service
 
 
 def utcnow() -> datetime:
@@ -247,26 +264,56 @@ def run_task(task_id: int, session: Session) -> Task:
     task = _mark_task_in_progress(task, session)
 
     try:
-        execution_result = execute_with_opencode(
-            prompt=task.prompt,
-            verification_prompt=task.verification_prompt,
-        )
-        
-        duration = time.time() - start_time
-        metrics.observe_task_duration(duration)
+        # Check if task uses OpenCode ACP
+        if task.opencode_project_path:
+            # Use ACP-based execution
+            session_service = _get_session_service()
+            
+            # Create session if not exists
+            if not task.opencode_session_id:
+                task = session_service.create_session(session, task)
+            
+            # Monitor session
+            session_service.monitor_sessions(session)
+            
+            # Refresh task
+            session.refresh(task)
+            
+            # Check if session is complete
+            if task.opencode_status.value == "completed":
+                task = session_service.complete_session(session, task)
+                _mark_source_done(task, session)
+                metrics.increment_task_processed("done")
+                return task
+            elif task.opencode_status.value == "failed":
+                metrics.increment_task_processed("failed")
+                return task
+            else:
+                # Session still running, return for later processing
+                metrics.increment_task_processed("running")
+                return task
+        else:
+            # Legacy REST-based execution
+            execution_result = execute_with_opencode(
+                prompt=task.prompt,
+                verification_prompt=task.verification_prompt,
+            )
+            
+            duration = time.time() - start_time
+            metrics.observe_task_duration(duration)
 
-        validation = validate_task_result(execution_result.raw_output)
+            validation = validate_task_result(execution_result.raw_output)
 
-        if validation.is_done:
-            task = _mark_task_done(task, execution_result.raw_output, session)
-            _mark_source_done(task, session)
-            metrics.increment_task_processed("done")
-            return task
+            if validation.is_done:
+                task = _mark_task_done(task, execution_result.raw_output, session)
+                _mark_source_done(task, session)
+                metrics.increment_task_processed("done")
+                return task
 
-        metrics.increment_task_processed("retry")
-        metrics.increment_task_retry(task.source_type)
-        return _requeue_or_fail_task(task, execution_result.raw_output, session)
-        
+            metrics.increment_task_processed("retry")
+            metrics.increment_task_retry(task.source_type)
+            return _requeue_or_fail_task(task, execution_result.raw_output, session)
+            
     except Exception as e:
         duration = time.time() - start_time
         metrics.observe_task_duration(duration)
