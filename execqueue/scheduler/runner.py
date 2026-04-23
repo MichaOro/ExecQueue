@@ -23,6 +23,7 @@ from execqueue.runtime import (
 from execqueue.validation.task_validator import validate_task_result
 from execqueue.workers.opencode_adapter import execute_with_opencode, OpenCodeACPClient
 from execqueue.services.opencode_session_service import OpenCodeSessionService
+from execqueue.services.status_sync_service import sync_task_status_to_parent
 from execqueue.api import metrics
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,53 @@ def _calculate_backoff_delay(retry_count: int) -> float:
     return min(delay, max_delay)
 
 
+def check_queue_blocked(session: Session, is_test: bool) -> bool:
+    """
+    Prüft ob die Queue durch einen block_queue Task blockiert ist.
+    
+    Args:
+        session: Datenbank-Session
+        is_test: Test-Modus Flag
+        
+    Returns:
+        True wenn Queue blockiert ist
+    """
+    blocking_task = session.exec(
+        select(Task)
+        .where(
+            Task.block_queue == True,
+            Task.status.in_(["queued", "in_progress"]),
+            Task.is_test == is_test,
+        )
+        .limit(1)
+    ).first()
+    
+    return blocking_task is not None
+
+
+def get_parallel_task_count(session: Session, is_test: bool) -> int:
+    """
+    Zählt die Anzahl aktuell paralleler Tasks.
+    
+    Args:
+        session: Datenbank-Session
+        is_test: Test-Modus Flag
+        
+    Returns:
+        Anzahl paralleler Tasks
+    """
+    count = session.exec(
+        select(Task)
+        .where(
+            Task.parallelization_allowed == True,
+            Task.status.in_(["queued", "in_progress"]),
+            Task.is_test == is_test,
+        )
+    ).count()
+    
+    return count
+
+
 def get_next_queued_task(session: Session) -> Optional[Task]:
     """
     Get next queued task and lock it for processing.
@@ -85,19 +133,33 @@ def get_next_queued_task(session: Session) -> Optional[Task]:
     Implements optimistic locking to prevent concurrent processing by multiple workers.
     Locks expired locks (older than WORKER_LOCK_TIMEOUT_SECONDS) are considered available.
     
+    Queue-Steuerung:
+    - block_queue: Wenn True, keine weiteren Tasks verarbeiten
+    - schedulable: Nur Tasks mit schedulable=True vom Scheduler verarbeiten
+    - parallelization_allowed: Berücksichtigung bei paralleler Ausführung
+    
     Returns:
         Task if available and successfully locked, None otherwise
     """
     current_time = utcnow()
     lock_timeout = get_worker_lock_timeout_seconds()
     lock_threshold = current_time - timedelta(seconds=lock_timeout)
+    is_test = is_test_mode()
+    
+    # Prüfen ob Queue blockiert ist
+    if check_queue_blocked(session, is_test):
+        logger.debug("Queue is blocked by a block_queue task, skipping")
+        return None
     
     # Find unlocked or expired-locked tasks
+    # Filter nach: schedulable=True, nicht blockierend, scheduled_after erfüllt
     statement = (
         select(Task)
         .where(
             Task.status == "queued",
-            Task.is_test == is_test_mode(),
+            Task.is_test == is_test,
+            Task.schedulable == True,  # Nur schedulable Tasks
+            Task.block_queue == False,  # Keine blockierenden Tasks
             or_(
                 # Not locked at all
                 and_(Task.locked_at == None, Task.locked_by == None),
@@ -118,13 +180,14 @@ def get_next_queued_task(session: Session) -> Optional[Task]:
         task.locked_at = current_time
         task.locked_by = WORKER_INSTANCE_ID
         task.updated_at = current_time
+        task.queue_status = "in_progress"  # Queue-Status aktualisieren
         session.add(task)
         session.commit()
         session.refresh(task)
         
         logger.info(
-            "Locked task %d for processing (worker: %s, status: %s)",
-            task.id, WORKER_INSTANCE_ID, task.status
+            "Locked task %d for processing (worker: %s, status: %s, queue_status: %s)",
+            task.id, WORKER_INSTANCE_ID, task.status, task.queue_status
         )
     
     return task
@@ -146,13 +209,18 @@ def _mark_task_done(task: Task, result_text: str, session: Session) -> Task:
     task.status = "done"
     task.last_result = result_text
     task.updated_at = utcnow()
+    task.queue_status = "done"  # Queue-Status aktualisieren
     # Clear lock on completion
     task.locked_at = None
     task.locked_by = None
     _commit_and_refresh(session, task)
+    
+    # Parent-Status synchronisieren
+    sync_task_status_to_parent(task, session)
+    
     logger.info(
-        "Task %d completed, lock released (was locked by: %s)",
-        task.id, task.locked_by
+        "Task %d completed, lock released (was locked by: %s, queue_status: %s)",
+        task.id, task.locked_by, task.queue_status
     )
     return task
 
@@ -273,10 +341,33 @@ def run_task(task_id: int, session: Session) -> Task:
             if not task.opencode_session_id:
                 task = session_service.create_session(session, task)
             
-            # Monitor session
-            session_service.monitor_sessions(session)
+            # Monitor session and check for timeouts
+            updated_tasks = session_service.monitor_sessions(session)
             
-            # Refresh task
+            # Check if any sessions need wake-up (waiting too long)
+            for updated_task in updated_tasks:
+                if updated_task.opencode_status == OpenCodeSessionStatus.WAITING:
+                    time_waiting = (datetime.now(timezone.utc) - (updated_task.opencode_last_ping or datetime.now(timezone.utc))).total_seconds()
+                    timeout_threshold = get_opencode_session_timeout() / 2
+                    
+                    if time_waiting > timeout_threshold:
+                        logger.info(
+                            "Auto wake-up for task %d: waiting %ds > threshold %ds",
+                            updated_task.id,
+                            time_waiting,
+                            timeout_threshold
+                        )
+                        session_service.wake_up_session(session, updated_task, prompt="Fahre fort")
+            
+            # Cleanup expired sessions
+            expired_count = session_service.cleanup_expired_sessions(
+                session,
+                timeout_seconds=get_opencode_session_timeout()
+            )
+            if expired_count > 0:
+                logger.info("Cleaned up %d expired sessions", expired_count)
+            
+            # Refresh current task
             session.refresh(task)
             
             # Check if session is complete

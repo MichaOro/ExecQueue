@@ -521,13 +521,19 @@ class OpenCodeACPClient:
         """
         Execute opencode command and parse JSON output.
         
+        Supports multiple output formats:
+        - Single JSON object: {"status": "completed", "output": "..."}
+        - JSON array: [{"event": "..."}, {"event": "..."}]
+        - NDJSON (newline-delimited JSON): One JSON object per line
+        - Plain text: Fallback if no JSON detected
+        
         Args:
             args: Command arguments (after 'opencode run')
             cwd: Working directory for the command
             timeout: Command timeout in seconds
             
         Returns:
-            Parsed JSON response
+            Parsed JSON response or aggregated events
             
         Raises:
             OpenCodeTimeoutError: If command times out
@@ -539,43 +545,113 @@ class OpenCodeACPClient:
         try:
             logger.debug("Executing ACP command: %s", " ".join(cmd[:10]))
             
-            result = subprocess.run(
+            # Use Popen for streaming output (better for long-running commands)
+            process = subprocess.Popen(
                 cmd,
                 cwd=cwd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout or self.timeout,
                 encoding="utf-8",
+                bufsize=1  # Line buffered
             )
             
-            if result.returncode != 0:
-                error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+            stdout_lines = []
+            json_events = []
+            
+            # Read output line by line
+            if process.stdout:
+                for line in process.stdout:
+                    line = line.rstrip('\n\r')
+                    if not line:
+                        continue
+                    
+                    stdout_lines.append(line)
+                    
+                    # Try to parse as JSON (NDJSON format)
+                    try:
+                        event = json.loads(line)
+                        json_events.append(event)
+                    except json.JSONDecodeError:
+                        # Not JSON, keep as text
+                        logger.debug("Non-JSON output line: %s", line[:100])
+                
+                # Wait for process to complete
+                process.wait(timeout=timeout or self.timeout)
+            
+            # Handle process errors
+            if process.returncode != 0:
+                error_output = ""
+                if process.stderr:
+                    error_output = process.stderr.read() or ""
+                error_msg = error_output.strip() or "Unknown error"
                 
                 if "session not found" in error_msg.lower() or "invalid session" in error_msg.lower():
                     raise OpenCodeSessionLostError(f"Session lost: {error_msg}")
                 
                 raise OpenCodeConnectionError(f"Command failed: {error_msg}")
             
-            # Try to parse JSON output
-            output = result.stdout.strip()
-            if output:
-                try:
-                    return json.loads(output)
-                except json.JSONDecodeError:
-                    # If not JSON, return as text
-                    logger.warning("Non-JSON output from opencode: %s", output[:200])
-                    return {"output": output, "status": "unknown"}
+            # Parse and return result
+            return self._parse_json_output(
+                "\n".join(stdout_lines),
+                json_events
+            )
             
-            return {"status": "success", "output": ""}
-            
-        except subprocess.TimeoutExpired as e:
-            raise OpenCodeTimeoutError(f"Command timed out after {timeout or self.timeout}s") from e
+        except subprocess.TimeoutExpired:
+            if process.poll() is None:
+                process.kill()
+            raise OpenCodeTimeoutError(f"Command timed out after {timeout or self.timeout}s")
         except FileNotFoundError as e:
             raise OpenCodeConfigurationError(
                 "opencode CLI not found in PATH. Please install opencode."
             ) from e
         except subprocess.SubprocessError as e:
             raise OpenCodeConnectionError(f"Subprocess error: {str(e)}") from e
+    
+    def _parse_json_output(self, stdout: str, json_events: list) -> dict:
+        """
+        Parse JSON output from various formats.
+        
+        Args:
+            stdout: Raw stdout output
+            json_events: List of successfully parsed JSON events
+            
+        Returns:
+            Aggregated result dict
+        """
+        # Case 1: We have parsed JSON events
+        if json_events:
+            if len(json_events) == 1:
+                # Single event - return as-is
+                return json_events[0]
+            else:
+                # Multiple events - return aggregated
+                return {
+                    "events": json_events,
+                    "status": "completed",
+                    "event_count": len(json_events),
+                    "last_event": json_events[-1]
+                }
+        
+        # Case 2: No JSON events, try to parse stdout as single JSON
+        stdout = stdout.strip()
+        if stdout:
+            try:
+                return json.loads(stdout)
+            except json.JSONDecodeError:
+                pass  # Not JSON, fall through to text
+        
+        # Case 3: Plain text output
+        if stdout:
+            logger.warning("No JSON detected in output, returning as text")
+            return {
+                "output": stdout,
+                "status": "unknown",
+                "type": "text"
+            }
+        
+        # Case 4: Empty output
+        return {"status": "success", "output": ""}
     
     @retry_on_transient_errors(max_retries=3, min_delay=1.0, max_delay=10.0)
     def start_session(

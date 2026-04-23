@@ -1,11 +1,13 @@
 import os
 import time
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Generator, Any
 from unittest.mock import MagicMock
 from sqlalchemy import text
-
 import pytest
+import requests
 from dotenv import dotenv_values
 from sqlmodel import SQLModel, Session, create_engine, select
 from fastapi.testclient import TestClient
@@ -14,26 +16,81 @@ from execqueue.models.task import Task
 from execqueue.models.requirement import Requirement
 from execqueue.models.work_package import WorkPackage
 from execqueue.models.dead_letter import DeadLetterQueue
-from execqueue.db.engine import engine
+
+# Importiere die Engine und Validierungsfunktionen
+from execqueue.db.engine import (
+    engine, 
+    DATABASE_URL, 
+    TEST_DATABASE_URL,
+    _load_database_url,
+    _load_test_database_url,
+    _validate_connection,
+    DOTENV_PATH
+)
 from execqueue.main import app
 
-DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
-DOTENV_VALUES = dotenv_values(DOTENV_PATH) if DOTENV_PATH.exists() else {}
+# Test-Setup: Prüfe ob .env existiert und valide ist
+def _check_test_database_requirements():
+    """Prüft ob alle Datenbank-Anforderungen für Tests erfüllt sind.
+    
+    Returns:
+        tuple: (skip_reason: str | None, db_url: str)
+               skip_reason ist None wenn alles ok, sonst Grund für Skip
+    """
+    # 1. Prüfe ob .env Datei existiert
+    if not DOTENV_PATH.exists():
+        return (
+            f".env Datei nicht gefunden bei {DOTENV_PATH}. "
+            "Tests werden übersprungen. Bitte .env Datei erstellen.",
+            ""
+        )
+    
+    # 2. Prüfe ob DATABASE_URL gesetzt ist
+    try:
+        database_url = _load_database_url()
+    except (FileNotFoundError, ValueError) as e:
+        return (str(e), "")
+    
+    # 3. Prüfe ob TEST_DATABASE_URL gesetzt ist (oder fallback zu DATABASE_URL)
+    test_db_url = _load_test_database_url()
+    if not test_db_url:
+        test_db_url = database_url
+    
+    # 4. Prüfe Datenbankverbindung
+    if not _validate_connection(test_db_url, "TEST_DATABASE"):
+        return (
+            f"Verbindung zu Test-Datenbank fehlgeschlagen. "
+            "Bitte TEST_DATABASE_URL (oder DATABASE_URL) in .env prüfen. "
+            "Tests werden übersprungen.",
+            ""
+        )
+    
+    return (None, test_db_url)
 
-TEST_DATABASE_URL = (
-    os.getenv("TEST_DATABASE_URL")
-    or os.getenv("DATABASE_URL")
-    or DOTENV_VALUES.get("TEST_DATABASE_URL")
-    or DOTENV_VALUES.get("DATABASE_URL")
-)
+
+# Führe Prüfung durch und speichere Ergebnis
+SKIP_REASON, VALID_DB_URL = _check_test_database_requirements()
+
+# Setze TEST_DATABASE_URL für den Rest des Skripts
+if VALID_DB_URL:
+    os.environ["TEST_DATABASE_URL"] = VALID_DB_URL
 
 TEST_QUEUE_PREFIX = os.getenv("TEST_QUEUE_PREFIX", "test_")
 TEST_ID_START = 9000
 
 
+# Custom pytest mark für Datenbank-Tests
+def pytest_runtest_setup(item):
+    """Skippt Tests wenn Datenbank-Anforderungen nicht erfüllt sind."""
+    # Prüfe ob dieser Test eine Datenbank benötigt
+    if item.get_closest_marker("db"):
+        if SKIP_REASON:
+            pytest.skip(SKIP_REASON)
+
+
 @pytest.fixture
 def client():
-    """Create a test client for API tests.
+    """Create a test client for API client.
     
     Overrides the get_session dependency to use the test database session.
     """
@@ -101,6 +158,7 @@ def sample_task(db_session):
         prompt="Sample prompt for testing",
         verification_prompt="Verify this task",
         status="queued",
+        queue_status="backlog",  # New field
         execution_order=1,
         retry_count=0,
         max_retries=5,
@@ -119,7 +177,10 @@ def sample_requirement(db_session):
         id=TEST_ID_START + 100,
         title=f"{TEST_QUEUE_PREFIX}Sample Requirement",
         description="Sample requirement description",
+        markdown_content="Sample requirement markdown content",  # Required field
         status="pending",
+        queue_status="backlog",  # New field
+        type="artifact",  # New field
         is_test=True,
     )
     db_session.add(req)
@@ -137,6 +198,7 @@ def sample_work_package(db_session, sample_requirement):
         title=f"{TEST_QUEUE_PREFIX}Sample Work Package",
         description="Sample work package description",
         execution_order=1,
+        queue_status="backlog",  # New field
         status="pending",
         is_test=True,
     )
@@ -157,6 +219,7 @@ def sample_task_queue(db_session, sample_requirement):
             source_id=sample_requirement.id,
             title=f"{TEST_QUEUE_PREFIX}Task {i+1}",
             prompt=f"Prompt for task {i+1}",
+            queue_status="backlog",  # New field
             execution_order=i + 1,
             status="queued",
             is_test=True,
@@ -229,3 +292,74 @@ def mock_worker_state(monkeypatch):
     yield
     
     health._worker_state = original_state
+
+
+# ============================================================================
+# ACP Integration Test Fixtures
+# ============================================================================
+
+@pytest.fixture(scope="session")
+def acp_server() -> Generator[str, None, None]:
+    """Start ACP server for integration tests and yield URL.
+    
+    Requires:
+        - opencode CLI installed
+        - OPENCODE_SERVER_PASSWORD set in environment
+        - Port 8766 available
+    """
+    port = 8766
+    url = f"http://127.0.0.1:{port}"
+    
+    # Check if ACP server should be started
+    if not os.getenv("RUN_INTEGRATION_TESTS"):
+        pytest.skip("Set RUN_INTEGRATION_TESTS=1 to run ACP integration tests")
+    
+    # Start server
+    password = os.getenv("OPENCODE_SERVER_PASSWORD", "test")
+    proc = subprocess.Popen(
+        ["opencode", "acp", "--port", str(port), "--hostname", "127.0.0.1"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "OPENCODE_SERVER_PASSWORD": password}
+    )
+    
+    # Wait for server to be ready
+    max_wait = 15
+    start = time.time()
+    
+    while time.time() - start < max_wait:
+        try:
+            response = requests.get(f"{url}/health", timeout=1)
+            if response.status_code == 200:
+                yield url
+                break
+        except (requests.ConnectionError, requests.Timeout):
+            time.sleep(0.5)
+    else:
+        proc.terminate()
+        pytest.fail(f"ACP server did not start within {max_wait}s")
+    
+    # Cleanup
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+@pytest.fixture
+def test_project_dir(tmp_path) -> str:
+    """Create a minimal test project directory with sample files."""
+    # Create test Python file
+    test_file = tmp_path / "test.py"
+    test_file.write_text("# Test project\n\ndef hello():\n    return 'Hello World'\n")
+    
+    # Create README
+    readme = tmp_path / "README.md"
+    readme.write_text("# Test Project\n\nThis is a test project for ACP integration.\n")
+    
+    # Create requirements.txt (empty)
+    (tmp_path / "requirements.txt").write_text("")
+    
+    return str(tmp_path)

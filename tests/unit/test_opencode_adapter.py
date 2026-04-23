@@ -508,13 +508,19 @@ class TestOpenCodeACPClient:
         """Test: Start session returns session ID."""
         monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
         
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({"session_id": "test-123", "status": "started"})
-        mock_result.stderr = ""
+        # Mock Popen for streaming output
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.stdout = iter([
+            json.dumps({"session_id": "test-123", "status": "started"}) + "\n"
+        ])
+        mock_process.stderr = ""
+        mock_process.wait = MagicMock(return_value=0)
+        mock_process.poll = MagicMock(return_value=0)
+        mock_process.kill = MagicMock()
         
-        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
-            mock_run.return_value = mock_result
+        with patch("execqueue.workers.opencode_adapter.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_process
             
             client = OpenCodeACPClient()
             session_id = client.start_session(
@@ -524,19 +530,24 @@ class TestOpenCodeACPClient:
             )
             
             assert session_id == "test-123"
-            mock_run.assert_called_once()
+            mock_popen.assert_called_once()
     
     def test_start_session_no_session_id(self, monkeypatch, tmp_path):
         """Test: Start session generates ID if not in response."""
         monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
         
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({"status": "started"})
-        mock_result.stderr = ""
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.stdout = iter([
+            json.dumps({"status": "started"}) + "\n"
+        ])
+        mock_process.stderr = ""
+        mock_process.wait = MagicMock(return_value=0)
+        mock_process.poll = MagicMock(return_value=0)
+        mock_process.kill = MagicMock()
         
-        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
-            mock_run.return_value = mock_result
+        with patch("execqueue.workers.opencode_adapter.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_process
             
             client = OpenCodeACPClient()
             session_id = client.start_session(prompt="Test", cwd=str(tmp_path))
@@ -547,13 +558,17 @@ class TestOpenCodeACPClient:
         """Test: Start session raises error on failure."""
         monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
         
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        mock_result.stderr = "Connection failed"
+        mock_process = MagicMock()
+        mock_process.returncode = 1
+        mock_process.stdout = iter([])
+        mock_process.stderr = MagicMock()
+        mock_process.stderr.read = MagicMock(return_value="Connection failed")
+        mock_process.wait = MagicMock(return_value=1)
+        mock_process.poll = MagicMock(return_value=1)
+        mock_process.kill = MagicMock()
         
-        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
-            mock_run.return_value = mock_result
+        with patch("execqueue.workers.opencode_adapter.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_process
             
             client = OpenCodeACPClient()
             
@@ -564,16 +579,21 @@ class TestOpenCodeACPClient:
         """Test: Get session status returns status dict."""
         monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
         
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "status": "running",
-            "output": "Processing..."
-        })
-        mock_result.stderr = ""
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.stdout = iter([
+            json.dumps({
+                "status": "running",
+                "output": "Processing..."
+            }) + "\n"
+        ])
+        mock_process.stderr = ""
+        mock_process.wait = MagicMock(return_value=0)
+        mock_process.poll = MagicMock(return_value=0)
+        mock_process.kill = MagicMock()
         
-        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
-            mock_run.return_value = mock_result
+        with patch("execqueue.workers.opencode_adapter.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_process
             
             client = OpenCodeACPClient()
             status = client.get_session_status("test-123")
@@ -586,13 +606,18 @@ class TestOpenCodeACPClient:
         """Test: Continue session sends prompt."""
         monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
         
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({"status": "continued"})
-        mock_result.stderr = ""
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.stdout = iter([
+            json.dumps({"status": "continued"}) + "\n"
+        ])
+        mock_process.stderr = ""
+        mock_process.wait = MagicMock(return_value=0)
+        mock_process.poll = MagicMock(return_value=0)
+        mock_process.kill = MagicMock()
         
-        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
-            mock_run.return_value = mock_result
+        with patch("execqueue.workers.opencode_adapter.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_process
             
             client = OpenCodeACPClient()
             result = client.continue_session("test-123", prompt="Continue")
@@ -601,17 +626,22 @@ class TestOpenCodeACPClient:
     
     def test_export_session_success(self, monkeypatch):
         """Test: Export session returns result."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            "session_id": "test-123",
-            "output": "Final result",
-            "status": "completed"
-        })
-        mock_result.stderr = ""
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.stdout = iter([
+            json.dumps({
+                "session_id": "test-123",
+                "output": "Final result",
+                "status": "completed"
+            }) + "\n"
+        ])
+        mock_process.stderr = ""
+        mock_process.wait = MagicMock(return_value=0)
+        mock_process.poll = MagicMock(return_value=0)
+        mock_process.kill = MagicMock()
         
-        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
-            mock_run.return_value = mock_result
+        with patch("execqueue.workers.opencode_adapter.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_process
             
             client = OpenCodeACPClient()
             result = client.export_session("test-123")
@@ -635,13 +665,17 @@ class TestOpenCodeACPClient:
         """Test: Session lost raises OpenCodeSessionLostError."""
         monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
         
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        mock_result.stderr = "session not found"
+        mock_process = MagicMock()
+        mock_process.returncode = 1
+        mock_process.stdout = iter([])
+        mock_process.stderr = MagicMock()
+        mock_process.stderr.read = MagicMock(return_value="session not found")
+        mock_process.wait = MagicMock(return_value=1)
+        mock_process.poll = MagicMock(return_value=1)
+        mock_process.kill = MagicMock()
         
-        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
-            mock_run.return_value = mock_result
+        with patch("execqueue.workers.opencode_adapter.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_process
             
             client = OpenCodeACPClient()
             
@@ -652,8 +686,8 @@ class TestOpenCodeACPClient:
         """Test: Missing CLI raises configuration error."""
         monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
         
-        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError("opencode")
+        with patch("execqueue.workers.opencode_adapter.subprocess.Popen") as mock_popen:
+            mock_popen.side_effect = FileNotFoundError("opencode")
             
             client = OpenCodeACPClient()
             
