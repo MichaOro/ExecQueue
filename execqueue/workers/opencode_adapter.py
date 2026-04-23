@@ -50,10 +50,12 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Optional
+from functools import wraps
+from typing import Optional, Callable, TypeVar
 
 import httpx
 
@@ -68,6 +70,8 @@ from execqueue.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
 
 
 class OpenCodeError(Exception):
@@ -101,6 +105,67 @@ class OpenCodeConfigurationError(OpenCodeError):
 class OpenCodeSessionLostError(OpenCodeError):
     """Raised when a session is lost or no longer accessible."""
     pass
+
+
+def retry_on_transient_errors(
+    max_retries: int = 3,
+    backoff_multiplier: float = 2.0,
+    min_delay: float = 1.0,
+    max_delay: float = 10.0,
+):
+    """
+    Decorator for retrying transient OpenCode errors.
+    
+    Args:
+        max_retries: Maximum number of retry attempts
+        backoff_multiplier: Multiplier for exponential backoff
+        min_delay: Minimum delay between retries (seconds)
+        max_delay: Maximum delay between retries (seconds)
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            last_exception: Exception | None = None
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                    
+                except (OpenCodeConnectionError, OpenCodeTimeoutError, OpenCodeSessionLostError) as e:
+                    last_exception = e
+                    
+                    if attempt < max_retries:
+                        # Calculate delay with exponential backoff + jitter
+                        delay = min(min_delay * (backoff_multiplier ** attempt), max_delay)
+                        jitter = delay * 0.1 * random.random()  # 10% jitter
+                        total_delay = delay + jitter
+                        
+                        logger.warning(
+                            "Transient error in %s (attempt %d/%d): %s. Retrying in %.2fs",
+                            func.__name__,
+                            attempt + 1,
+                            max_retries + 1,
+                            str(e)[:100],
+                            total_delay
+                        )
+                        
+                        time.sleep(total_delay)
+                    else:
+                        logger.error(
+                            "Failed after %d attempts in %s: %s",
+                            max_retries + 1,
+                            func.__name__,
+                            str(e)[:200]
+                        )
+                        raise
+            
+            # Should never reach here, but just in case
+            if last_exception:
+                raise last_exception
+            raise RuntimeError("Unexpected state in retry decorator")
+        
+        return wrapper
+    return decorator
 
 
 @dataclass
@@ -512,6 +577,7 @@ class OpenCodeACPClient:
         except subprocess.SubprocessError as e:
             raise OpenCodeConnectionError(f"Subprocess error: {str(e)}") from e
     
+    @retry_on_transient_errors(max_retries=3, min_delay=1.0, max_delay=10.0)
     def start_session(
         self,
         prompt: str,
@@ -563,6 +629,7 @@ class OpenCodeACPClient:
         logger.info("ACP session started: session_id=%s", session_id)
         return session_id
     
+    @retry_on_transient_errors(max_retries=2, min_delay=1.0, max_delay=5.0)
     def get_session_status(self, session_id: str) -> dict:
         """
         Get the status of a session.
@@ -596,6 +663,7 @@ class OpenCodeACPClient:
             "raw_output": result.get("raw_output", ""),
         }
     
+    @retry_on_transient_errors(max_retries=2, min_delay=1.0, max_delay=5.0)
     def continue_session(
         self,
         session_id: str,
