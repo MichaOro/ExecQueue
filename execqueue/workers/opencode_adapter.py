@@ -3,15 +3,21 @@ OpenCode Adapter - Production-ready integration with OpenCode Execution Engine.
 
 This module provides a robust HTTP client for communicating with the OpenCode API,
 including retry logic with exponential backoff, timeout handling, and comprehensive logging.
+It also supports the Agent Client Protocol (ACP) for session-based orchestration.
 
-Configuration:
+Configuration (REST):
     OPENCODE_BASE_URL (required): Base URL of the OpenCode API (e.g., http://localhost:8000)
     OPENCODE_TIMEOUT (default: 120): Timeout in seconds for API requests
     OPENCODE_MAX_RETRIES (default: 3): Number of retries for network errors
     OPENCODE_USERNAME (optional): Username for HTTP Basic Auth
     OPENCODE_PASSWORD (optional): Password for HTTP Basic Auth
 
-API Specification:
+Configuration (ACP):
+    OPENCODE_ACP_URL (default: http://localhost:8765): Base URL of the ACP server
+    OPENCODE_SESSION_TIMEOUT (default: 300): Timeout in seconds for sessions
+    OPENCODE_PASSWORD (optional): Password for ACP authentication
+
+REST API Specification:
     Request: POST {base_url}/execute
     Body: {
         "prompt": str,
@@ -24,18 +30,27 @@ API Specification:
         "summary": str
     }
 
-Example:
+Example (REST):
     >>> from execqueue.workers.opencode_adapter import execute_with_opencode
     >>> result = execute_with_opencode(
     ...     prompt="Implement a function that adds two numbers",
     ...     verification_prompt="Verify the function handles edge cases"
     ... )
     >>> print(result.summary)
+
+Example (ACP):
+    >>> from execqueue.workers.opencode_adapter import OpenCodeACPClient
+    >>> client = OpenCodeACPClient(acp_url="http://localhost:8765", password="secret")
+    >>> session_id = client.start_session("Implement feature X", cwd="/path/to/project")
+    >>> status = client.get_session_status(session_id)
+    >>> result = client.export_session(session_id)
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -48,6 +63,8 @@ from execqueue.runtime import (
     get_opencode_max_retries,
     get_opencode_username,
     get_opencode_password,
+    get_opencode_acp_url,
+    get_opencode_session_timeout,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +95,11 @@ class OpenCodeHTTPError(OpenCodeError):
 
 class OpenCodeConfigurationError(OpenCodeError):
     """Raised when OpenCode is not properly configured."""
+    pass
+
+
+class OpenCodeSessionLostError(OpenCodeError):
+    """Raised when a session is lost or no longer accessible."""
     pass
 
 
@@ -366,3 +388,311 @@ def execute_with_opencode(
         auth=auth,
     ) as client:
         return client.execute(prompt, verification_prompt)
+
+
+# ============================================================================
+# ACP (Agent Client Protocol) Client
+# ============================================================================
+
+class OpenCodeACPClient:
+    """
+    Client für die Kommunikation mit dem OpenCode ACP-Server.
+    
+    Dieser Client nutzt die OpenCode CLI zur Steuerung von Sessions über
+    Subprocess-Aufrufe mit JSON-Output für strukturierte Parsing.
+    
+    Configuration:
+        OPENCODE_ACP_URL: Base URL of the ACP server (default: http://localhost:8765)
+        OPENCODE_SESSION_TIMEOUT: Session timeout in seconds (default: 300)
+        OPENCODE_PASSWORD: Password for ACP authentication (optional)
+    
+    Example:
+        >>> client = OpenCodeACPClient(acp_url="http://localhost:8765", password="secret")
+        >>> session_id = client.start_session("Implement feature", cwd="/path/to/project")
+        >>> status = client.get_session_status(session_id)
+        >>> result = client.export_session(session_id)
+    """
+    
+    def __init__(
+        self,
+        acp_url: str | None = None,
+        password: str | None = None,
+        timeout: int | None = None,
+    ):
+        """
+        Initialisiere den ACP-Client.
+        
+        Args:
+            acp_url: ACP-Server URL (default from OPENCODE_ACP_URL)
+            password: Password for authentication (default from OPENCODE_PASSWORD)
+            timeout: Session timeout in seconds (default from OPENCODE_SESSION_TIMEOUT)
+        """
+        self.acp_url = acp_url or get_opencode_acp_url()
+        self.password = password or get_opencode_password()
+        self.timeout = timeout or get_opencode_session_timeout()
+        
+        logger.info(
+            "OpenCodeACPClient initialized: url=%s, timeout=%ds, password=%s",
+            self.acp_url,
+            self.timeout,
+            "set" if self.password else "not set"
+        )
+    
+    def _build_base_command(self) -> list[str]:
+        """Build base opencode command with common flags."""
+        cmd = ["opencode", "run"]
+        
+        if self.password:
+            cmd.extend(["--password", self.password])
+        
+        return cmd
+    
+    def _run_command(
+        self,
+        args: list[str],
+        cwd: str | None = None,
+        timeout: int | None = None,
+    ) -> dict:
+        """
+        Execute opencode command and parse JSON output.
+        
+        Args:
+            args: Command arguments (after 'opencode run')
+            cwd: Working directory for the command
+            timeout: Command timeout in seconds
+            
+        Returns:
+            Parsed JSON response
+            
+        Raises:
+            OpenCodeTimeoutError: If command times out
+            OpenCodeConnectionError: If command fails
+            OpenCodeSessionLostError: If session is not found
+        """
+        cmd = self._build_base_command() + args
+        
+        try:
+            logger.debug("Executing ACP command: %s", " ".join(cmd[:10]))
+            
+            result = subprocess.run(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=timeout or self.timeout,
+                encoding="utf-8",
+            )
+            
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
+                
+                if "session not found" in error_msg.lower() or "invalid session" in error_msg.lower():
+                    raise OpenCodeSessionLostError(f"Session lost: {error_msg}")
+                
+                raise OpenCodeConnectionError(f"Command failed: {error_msg}")
+            
+            # Try to parse JSON output
+            output = result.stdout.strip()
+            if output:
+                try:
+                    return json.loads(output)
+                except json.JSONDecodeError:
+                    # If not JSON, return as text
+                    logger.warning("Non-JSON output from opencode: %s", output[:200])
+                    return {"output": output, "status": "unknown"}
+            
+            return {"status": "success", "output": ""}
+            
+        except subprocess.TimeoutExpired as e:
+            raise OpenCodeTimeoutError(f"Command timed out after {timeout or self.timeout}s") from e
+        except FileNotFoundError as e:
+            raise OpenCodeConfigurationError(
+                "opencode CLI not found in PATH. Please install opencode."
+            ) from e
+        except subprocess.SubprocessError as e:
+            raise OpenCodeConnectionError(f"Subprocess error: {str(e)}") from e
+    
+    def start_session(
+        self,
+        prompt: str,
+        cwd: str,
+        title: str | None = None,
+    ) -> str:
+        """
+        Start a new OpenCode session.
+        
+        Args:
+            prompt: The prompt to execute
+            cwd: Project directory for the session
+            title: Optional title for the session
+            
+        Returns:
+            Session ID
+            
+        Raises:
+            OpenCodeError: If session creation fails
+        """
+        args = [
+            "--attach", self.acp_url,
+            "--cwd", cwd,
+            "--format", "json",
+            "--print-logs",
+            "--log-level", "ERROR",
+            prompt,
+        ]
+        
+        if title:
+            args.extend(["--title", title])
+        
+        logger.info(
+            "Starting ACP session: prompt_length=%d, cwd=%s, title=%s",
+            len(prompt),
+            cwd,
+            title or "none"
+        )
+        
+        result = self._run_command(args, cwd=cwd)
+        
+        # Extract session ID from result
+        session_id = result.get("session_id") or result.get("id")
+        if not session_id:
+            # If no session ID in response, generate one or extract from output
+            logger.warning("No session_id in response, using timestamp-based ID")
+            session_id = f"session-{int(time.time())}"
+        
+        logger.info("ACP session started: session_id=%s", session_id)
+        return session_id
+    
+    def get_session_status(self, session_id: str) -> dict:
+        """
+        Get the status of a session.
+        
+        Args:
+            session_id: The session ID to check
+            
+        Returns:
+            Session status information
+            
+        Raises:
+            OpenCodeSessionLostError: If session not found
+        """
+        # Use 'opencode session get' or attach to session
+        args = [
+            "--attach", self.acp_url,
+            "--session", session_id,
+            "--format", "json",
+            "--print-logs",
+            "--log-level", "ERROR",
+            "Status check",
+        ]
+        
+        logger.debug("Checking session status: session_id=%s", session_id)
+        result = self._run_command(args)
+        
+        return {
+            "session_id": session_id,
+            "status": result.get("status", "unknown"),
+            "output": result.get("output", ""),
+            "raw_output": result.get("raw_output", ""),
+        }
+    
+    def continue_session(
+        self,
+        session_id: str,
+        prompt: str | None = None,
+    ) -> dict:
+        """
+        Continue a paused session.
+        
+        Args:
+            session_id: The session ID to continue
+            prompt: Optional prompt to send when continuing
+            
+        Returns:
+            Session result
+            
+        Raises:
+            OpenCodeSessionLostError: If session not found
+        """
+        args = [
+            "--attach", self.acp_url,
+            "--session", session_id,
+            "--continue",
+            "--format", "json",
+            "--print-logs",
+            "--log-level", "ERROR",
+        ]
+        
+        if prompt:
+            args.append(prompt)
+        
+        logger.info("Continuing ACP session: session_id=%s", session_id)
+        result = self._run_command(args)
+        
+        return {
+            "session_id": session_id,
+            "status": result.get("status", "continued"),
+            "output": result.get("output", ""),
+        }
+    
+    def export_session(self, session_id: str) -> dict:
+        """
+        Export the result of a completed session.
+        
+        Args:
+            session_id: The session ID to export
+            
+        Returns:
+            Session result including full output
+            
+        Raises:
+            OpenCodeSessionLostError: If session not found
+        """
+        # Use 'opencode export' command
+        try:
+            cmd = ["opencode", "export", session_id]
+            if self.password:
+                cmd.extend(["--password", self.password])
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                encoding="utf-8",
+            )
+            
+            if result.returncode != 0:
+                raise OpenCodeConnectionError(f"Export failed: {result.stderr}")
+            
+            output = result.stdout.strip()
+            try:
+                return json.loads(output)
+            except json.JSONDecodeError:
+                return {"session_id": session_id, "output": output}
+                
+        except subprocess.TimeoutExpired:
+            raise OpenCodeTimeoutError("Export timed out")
+        except FileNotFoundError:
+            raise OpenCodeConfigurationError("opencode CLI not found")
+    
+    def close_session(self, session_id: str) -> None:
+        """
+        Close a session gracefully.
+        
+        Args:
+            session_id: The session ID to close
+        """
+        logger.info("Closing ACP session: session_id=%s", session_id)
+        # Note: Sessions may auto-close after timeout
+        # This is a best-effort cleanup
+        try:
+            args = [
+                "--attach", self.acp_url,
+                "--session", session_id,
+                "--format", "json",
+                "Session closed",
+            ]
+            self._run_command(args, timeout=10)
+        except Exception as e:
+            logger.warning("Failed to close session %s: %s", session_id, e)

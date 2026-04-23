@@ -12,6 +12,8 @@ from execqueue.workers.opencode_adapter import (
     OpenCodeConnectionError,
     OpenCodeHTTPError,
     OpenCodeConfigurationError,
+    OpenCodeSessionLostError,
+    OpenCodeACPClient,
 )
 from execqueue.validation.task_validator import validate_task_result
 
@@ -469,3 +471,191 @@ class TestOpenCodeContract:
         
         assert result.summary is not None
         assert isinstance(result.summary, str)
+
+
+# ============================================================================
+# Tests for OpenCodeACPClient
+# ============================================================================
+
+class TestOpenCodeACPClient:
+    """Tests for OpenCodeACPClient class."""
+    
+    def test_client_initialization_defaults(self, monkeypatch):
+        """Test: Client initializes with default values from env."""
+        monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.acp.local")
+        monkeypatch.setenv("OPENCODE_PASSWORD", "testpass")
+        monkeypatch.setenv("OPENCODE_SESSION_TIMEOUT", "600")
+        
+        client = OpenCodeACPClient()
+        
+        assert client.acp_url == "http://test.acp.local"
+        assert client.password == "testpass"
+        assert client.timeout == 600
+    
+    def test_client_initialization_explicit(self):
+        """Test: Client initializes with explicit values."""
+        client = OpenCodeACPClient(
+            acp_url="http://explicit.local",
+            password="explicitpass",
+            timeout=900,
+        )
+        
+        assert client.acp_url == "http://explicit.local"
+        assert client.password == "explicitpass"
+        assert client.timeout == 900
+    
+    def test_start_session_success(self, monkeypatch, tmp_path):
+        """Test: Start session returns session ID."""
+        monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
+        
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({"session_id": "test-123", "status": "started"})
+        mock_result.stderr = ""
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            
+            client = OpenCodeACPClient()
+            session_id = client.start_session(
+                prompt="Test prompt",
+                cwd=str(tmp_path),
+                title="Test Session"
+            )
+            
+            assert session_id == "test-123"
+            mock_run.assert_called_once()
+    
+    def test_start_session_no_session_id(self, monkeypatch, tmp_path):
+        """Test: Start session generates ID if not in response."""
+        monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
+        
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({"status": "started"})
+        mock_result.stderr = ""
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            
+            client = OpenCodeACPClient()
+            session_id = client.start_session(prompt="Test", cwd=str(tmp_path))
+            
+            assert session_id.startswith("session-")
+    
+    def test_start_session_failure(self, monkeypatch, tmp_path):
+        """Test: Start session raises error on failure."""
+        monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
+        
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "Connection failed"
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            
+            client = OpenCodeACPClient()
+            
+            with pytest.raises(OpenCodeConnectionError, match="Command failed"):
+                client.start_session(prompt="Test", cwd=str(tmp_path))
+    
+    def test_get_session_status(self, monkeypatch):
+        """Test: Get session status returns status dict."""
+        monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
+        
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "status": "running",
+            "output": "Processing..."
+        })
+        mock_result.stderr = ""
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            
+            client = OpenCodeACPClient()
+            status = client.get_session_status("test-123")
+            
+            assert status["session_id"] == "test-123"
+            assert status["status"] == "running"
+            assert status["output"] == "Processing..."
+    
+    def test_continue_session(self, monkeypatch):
+        """Test: Continue session sends prompt."""
+        monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
+        
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({"status": "continued"})
+        mock_result.stderr = ""
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            
+            client = OpenCodeACPClient()
+            result = client.continue_session("test-123", prompt="Continue")
+            
+            assert result["status"] == "continued"
+    
+    def test_export_session_success(self, monkeypatch):
+        """Test: Export session returns result."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            "session_id": "test-123",
+            "output": "Final result",
+            "status": "completed"
+        })
+        mock_result.stderr = ""
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            
+            client = OpenCodeACPClient()
+            result = client.export_session("test-123")
+            
+            assert result["output"] == "Final result"
+            assert result["status"] == "completed"
+    
+    def test_export_session_timeout(self, monkeypatch):
+        """Test: Export session raises timeout error."""
+        from subprocess import TimeoutExpired
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.side_effect = TimeoutExpired(cmd="opencode export", timeout=30)
+            
+            client = OpenCodeACPClient()
+            
+            with pytest.raises(OpenCodeTimeoutError, match="timed out"):
+                client.export_session("test-123")
+    
+    def test_session_lost_error(self, monkeypatch):
+        """Test: Session lost raises OpenCodeSessionLostError."""
+        monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
+        
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "session not found"
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.return_value = mock_result
+            
+            client = OpenCodeACPClient()
+            
+            with pytest.raises(OpenCodeSessionLostError, match="Session lost"):
+                client.get_session_status("invalid-session")
+    
+    def test_cli_not_found_error(self, monkeypatch):
+        """Test: Missing CLI raises configuration error."""
+        monkeypatch.setenv("OPENCODE_ACP_URL", "http://test.local")
+        
+        with patch("execqueue.workers.opencode_adapter.subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError("opencode")
+            
+            client = OpenCodeACPClient()
+            
+            with pytest.raises(OpenCodeConfigurationError, match="not found"):
+                client.start_session(prompt="Test", cwd="/tmp")

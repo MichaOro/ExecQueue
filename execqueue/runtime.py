@@ -224,6 +224,40 @@ def get_opencode_password() -> str | None:
     return os.getenv("OPENCODE_PASSWORD")
 
 
+def get_opencode_acp_url() -> str:
+    """Liefert die Basis-URL des OpenCode ACP-Servers.
+    
+    Default: http://localhost:8765
+    """
+    return os.getenv("OPENCODE_ACP_URL", "http://localhost:8765")
+
+
+def get_opencode_session_timeout() -> int:
+    """Liefert den Timeout in Sekunden für OpenCode Sessions.
+    
+    Default: 300 Sekunden (5 Minuten)
+    """
+    value = os.getenv("OPENCODE_SESSION_TIMEOUT")
+    if value is None:
+        return 300
+    
+    try:
+        timeout = int(value.strip())
+        if timeout < 60 or timeout > 3600:
+            logger.warning(
+                "OPENCODE_SESSION_TIMEOUT %d outside valid range [60, 3600], using default 300",
+                timeout
+            )
+            return 300
+        return timeout
+    except ValueError:
+        logger.warning(
+            "Invalid OPENCODE_SESSION_TIMEOUT value '%s', using default 300",
+            value
+        )
+        return 300
+
+
 def get_worker_instance_id() -> str:
     """Liefert die eindeutige ID dieser Worker-Instanz."""
     return os.getenv("WORKER_INSTANCE_ID") or f"worker-{os.getpid()}"
