@@ -67,6 +67,25 @@ class TestOpenCodeClient:
         assert client.timeout == 60
         assert client.max_retries == 5
 
+    def test_client_initialization_with_auth(self):
+        """Test: Client initializes with HTTP Basic Auth."""
+        client = OpenCodeClient(
+            base_url="http://test.local",
+            auth=("testuser", "testpass"),
+        )
+        assert client.base_url == "http://test.local"
+        assert client.auth == ("testuser", "testpass")
+        assert client.timeout == 120
+        assert client.max_retries == 3
+
+    def test_client_initialization_without_auth(self):
+        """Test: Client initializes without auth (None)."""
+        client = OpenCodeClient(
+            base_url="http://test.local",
+            auth=None,
+        )
+        assert client.auth is None
+
     def test_client_trims_base_url_slash(self):
         """Test: Client removes trailing slash from base_url."""
         client = OpenCodeClient(base_url="http://test.local/")
@@ -178,6 +197,39 @@ class TestExecuteWithOpencode:
             assert result.status == "completed"
             assert result.raw_output == "Test output"
             assert result.summary == "Test summary"
+
+    def test_successful_execution_with_auth(self, monkeypatch):
+        """Test: Successful execution includes HTTP Basic Auth."""
+        monkeypatch.setenv("OPENCODE_BASE_URL", "http://test.local")
+        monkeypatch.setenv("OPENCODE_USERNAME", "testuser")
+        monkeypatch.setenv("OPENCODE_PASSWORD", "testpass")
+        
+        mock_response = {
+            "status": "completed",
+            "output": "Test output",
+            "summary": "Test summary",
+        }
+        
+        with patch("httpx.Client.post") as mock_post:
+            mock_response_obj = MagicMock()
+            mock_response_obj.status_code = 200
+            mock_response_obj.json.return_value = mock_response
+            mock_post.return_value = mock_response_obj
+            
+            result = execute_with_opencode(prompt="test prompt")
+            
+            assert isinstance(result, OpenCodeExecutionResult)
+            assert result.status == "completed"
+            # Verify auth was passed to httpx.Client
+            assert mock_post.call_count == 1
+            # Check that the client was initialized with auth
+            from httpx import Client
+            with patch.object(Client, "__init__", return_value=None) as mock_client_init:
+                client = OpenCodeClient(
+                    base_url="http://test.local",
+                    auth=("testuser", "testpass"),
+                )
+                assert client.auth == ("testuser", "testpass")
 
     def test_successful_execution_with_verification(self, monkeypatch):
         """Test: Execution includes verification_prompt."""

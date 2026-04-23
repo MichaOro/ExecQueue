@@ -8,6 +8,8 @@ Configuration:
     OPENCODE_BASE_URL (required): Base URL of the OpenCode API (e.g., http://localhost:8000)
     OPENCODE_TIMEOUT (default: 120): Timeout in seconds for API requests
     OPENCODE_MAX_RETRIES (default: 3): Number of retries for network errors
+    OPENCODE_USERNAME (optional): Username for HTTP Basic Auth
+    OPENCODE_PASSWORD (optional): Password for HTTP Basic Auth
 
 API Specification:
     Request: POST {base_url}/execute
@@ -44,6 +46,8 @@ from execqueue.runtime import (
     get_opencode_base_url,
     get_opencode_timeout,
     get_opencode_max_retries,
+    get_opencode_username,
+    get_opencode_password,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,11 +98,13 @@ class OpenCodeClient:
     - Timeout handling
     - Comprehensive logging
     - Type-safe response parsing
+    - HTTP Basic Auth support (optional)
     
     Args:
         base_url: Base URL of the OpenCode API
         timeout: Timeout in seconds for API requests
         max_retries: Maximum number of retries for transient errors
+        auth: Optional tuple of (username, password) for HTTP Basic Auth
     """
     
     def __init__(
@@ -106,11 +112,15 @@ class OpenCodeClient:
         base_url: str,
         timeout: int = 120,
         max_retries: int = 3,
+        auth: tuple[str, str] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
-        self._client = httpx.Client(timeout=timeout)
+        self.auth = auth
+        
+        # httpx.Client unterstützt auth-Parameter für Basic Auth
+        self._client = httpx.Client(timeout=timeout, auth=auth)
     
     def execute(
         self,
@@ -305,6 +315,8 @@ def execute_with_opencode(
         OPENCODE_BASE_URL: Required. Base URL of the OpenCode API.
         OPENCODE_TIMEOUT: Optional. Timeout in seconds (default: 120).
         OPENCODE_MAX_RETRIES: Optional. Max retries for transient errors (default: 3).
+        OPENCODE_USERNAME: Optional. Username for HTTP Basic Auth.
+        OPENCODE_PASSWORD: Optional. Password for HTTP Basic Auth.
     
     Args:
         prompt: The main prompt to execute
@@ -336,10 +348,21 @@ def execute_with_opencode(
     
     timeout = get_opencode_timeout()
     max_retries = get_opencode_max_retries()
+    username = get_opencode_username()
+    password = get_opencode_password()
+    
+    # HTTP Basic Auth konfigurieren, falls Credentials vorhanden
+    auth = None
+    if username and password:
+        auth = (username, password)
+        logger.info("OpenCode: HTTP Basic Auth configured")
+    else:
+        logger.info("OpenCode: No authentication configured (assuming public API)")
     
     with OpenCodeClient(
         base_url=base_url,
         timeout=timeout,
         max_retries=max_retries,
+        auth=auth,
     ) as client:
         return client.execute(prompt, verification_prompt)

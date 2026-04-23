@@ -214,6 +214,16 @@ def get_opencode_max_retries() -> int:
         return 3
 
 
+def get_opencode_username() -> str | None:
+    """Liefert den Username für die OpenCode API-Authentifizierung."""
+    return os.getenv("OPENCODE_USERNAME")
+
+
+def get_opencode_password() -> str | None:
+    """Liefert das Passwort für die OpenCode API-Authentifizierung."""
+    return os.getenv("OPENCODE_PASSWORD")
+
+
 def get_worker_instance_id() -> str:
     """Liefert die eindeutige ID dieser Worker-Instanz."""
     return os.getenv("WORKER_INSTANCE_ID") or f"worker-{os.getpid()}"
