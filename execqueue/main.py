@@ -1,5 +1,9 @@
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
+from dotenv import load_dotenv
+
+# Lade .env Datei beim Start
+load_dotenv()
 
 from execqueue.api.dead_letter import router as dead_letter_router
 from execqueue.api.tasks import router as tasks_router

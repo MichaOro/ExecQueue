@@ -12,12 +12,20 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from collections import defaultdict
 
+# Lade .env Datei beim Start
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv nicht installiert, ignoriere
+
 from sqlmodel import Session, select
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 from typing import Any
 
-from execqueue.db.session import get_session
+from sqlmodel import Session
+from execqueue.db.engine import engine
 from execqueue.models.telegram_user import TelegramUser
 from execqueue.models.task import Task
 from execqueue.services.telegram_admin_service import TelegramAdminService, log_admin_action
@@ -39,6 +47,7 @@ class TelegramBotWorker:
         self.rate_limits: Dict[str, List[datetime]] = defaultdict(list)
         self.rate_limit_per_minute = int(os.getenv("TELEGRAM_RATE_LIMIT_PER_MINUTE", "30"))
         self.api_base_url = os.getenv("API_BASE_URL", "http://127.0.0.1:8000/api")
+        self._stop_event: Optional[asyncio.Event] = None
         
     async def start(self):
         """Startet den Bot (Polling-Modus)."""
@@ -58,6 +67,9 @@ class TelegramBotWorker:
         # Command-Handler registrieren
         self._register_commands()
         
+        # Stop-Event erstellen
+        self._stop_event = asyncio.Event()
+        
         # Bot starten
         logger.info("Telegram Bot startet im Polling-Modus...")
         await self.application.initialize()
@@ -65,8 +77,11 @@ class TelegramBotWorker:
         await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         logger.info("Telegram Bot läuft")
         
-        # Blockieren bis Stopp
-        await self.application.idle()
+        # Blockieren bis Stopp (nutze asyncio.Event statt idle())
+        try:
+            await self._stop_event.wait()  # Wartet unendlich bis ein Signal kommt
+        except asyncio.CancelledError:
+            logger.info("Bot wurde abgebrochen")
     
     async def stop(self):
         """Stoppt den Bot graceful."""
@@ -76,6 +91,10 @@ class TelegramBotWorker:
             await self.application.stop()
             await self.application.shutdown()
             logger.info("Telegram Bot gestoppt")
+        
+        # Setze Stop-Event um start() zu beenden
+        if self._stop_event:
+            self._stop_event.set()
     
     def _register_commands(self):
         """Registriert alle Command-Handler."""
@@ -126,21 +145,25 @@ class TelegramBotWorker:
     
     async def get_or_create_user(self, telegram_id: str, update_data: Dict) -> TelegramUser:
         """Erstellt oder aktualisiert TelegramUser in der Datenbank."""
-        with get_session() as session:
+        with Session(engine) as session:
             user = session.exec(
                 select(TelegramUser).where(TelegramUser.telegram_id == telegram_id)
             ).first()
             
             if not user:
+                # Prüfen ob User in ADMIN_USER_IDS ist
+                role = "admin" if telegram_id in self.admin_user_ids else "observer"
+                
                 user = TelegramUser(
                     telegram_id=telegram_id,
                     username=update_data.get("username"),
                     first_name=update_data.get("first_name"),
                     last_name=update_data.get("last_name"),
-                    role="observer",  # Default-Rolle
+                    role=role,  # Automatische Admin-Erkennung!
                     is_test=False
                 )
                 session.add(user)
+                logger.info(f"Created user {telegram_id} with role: {role}")
             else:
                 # Daten aktualisieren
                 if update_data.get("username"):
@@ -158,7 +181,7 @@ class TelegramBotWorker:
     
     async def check_user_permission(self, user_id: str, required_role: str) -> bool:
         """Prüft ob Benutzer die erforderliche Rolle hat."""
-        with get_session() as session:
+        with Session(engine) as session:
             user = session.exec(
                 select(TelegramUser).where(TelegramUser.telegram_id == user_id)
             ).first()
@@ -232,7 +255,7 @@ class TelegramBotWorker:
         
         url = f"{self.api_base_url}/{endpoint}"
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             try:
                 if method == "GET":
                     response = await client.get(url, params=data)
@@ -568,7 +591,7 @@ class TelegramBotWorker:
             )
             return
         
-        with get_session() as session:
+        with Session(engine) as session:
             user = session.exec(
                 select(TelegramUser).where(TelegramUser.telegram_id == user_id)
             ).first()
@@ -596,7 +619,7 @@ class TelegramBotWorker:
         
         event_type = context.args[0]
         
-        with get_session() as session:
+        with Session(engine) as session:
             user = session.exec(
                 select(TelegramUser).where(TelegramUser.telegram_id == user_id)
             ).first()
@@ -618,7 +641,7 @@ class TelegramBotWorker:
         """/notifications - Zeige aktuelle Subscriptions."""
         user_id = str(update.effective_user.id)
         
-        with get_session() as session:
+        with Session(engine) as session:
             user = session.exec(
                 select(TelegramUser).where(TelegramUser.telegram_id == user_id)
             ).first()

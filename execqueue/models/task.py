@@ -2,6 +2,7 @@ from sqlmodel import SQLModel, Field
 from typing import Optional
 from datetime import datetime, timezone
 from enum import Enum
+from sqlalchemy import BigInteger
 
 
 def utcnow() -> datetime:
@@ -22,7 +23,7 @@ class Task(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source_type: str = Field(index=True)
-    source_id: int = Field(index=True)
+    source_id: int = Field(index=True, sa_type=BigInteger)  # BIGINT für Telegram User IDs (zu groß für INTEGER)
     title: str
     prompt: str
     verification_prompt: Optional[str] = None

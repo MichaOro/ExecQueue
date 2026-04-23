@@ -43,7 +43,7 @@ def _worker_loop() -> None:
 
     while not _shutdown_requested:
         try:
-            with next(get_session()) as session:
+            with get_session() as session:
                 task = run_next_task(session)
 
                 if task:
