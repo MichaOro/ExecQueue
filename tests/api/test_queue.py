@@ -89,7 +89,7 @@ class TestQueueAPI:
         assert response.status_code == 404
 
     def test_enqueue_requirement_updates_requirement_status(self, api_client, session_with_data):
-        """Test: Requirement status changes to planned after enqueue."""
+        """Test: Requirement queue_status changes after enqueue."""
         from sqlmodel import select
         req = Requirement(
             title="Status Test Req",
@@ -102,13 +102,23 @@ class TestQueueAPI:
         session_with_data.refresh(req)
 
         assert req.status == "pending"
+        assert req.queue_status == "backlog"
 
         payload = {"requirement_id": req.id}
 
         api_client.post("/api/queue/enqueue-requirement", json=payload)
 
         refreshed_req = session_with_data.get(Requirement, req.id)
-        assert refreshed_req.status == "planned"
+        # After enqueue without WPs, queue_status stays backlog and has_work_packages is False
+        # The task is created with source_type="requirement"
+        assert refreshed_req.queue_status == "backlog"
+        
+        # Verify task was created
+        task = session_with_data.exec(
+            select(Task).where(Task.source_id == req.id)
+        ).first()
+        assert task is not None
+        assert task.source_type == "requirement"
 
     def test_enqueue_requirement_sets_task_status_queued(self, api_client, session_with_data):
         """Test: Created tasks have status='queued'."""

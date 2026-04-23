@@ -14,6 +14,7 @@ from execqueue.services.status_sync_service import (
     update_requirement_queue_status,
     get_kanban_summary,
     VALID_STATUS_TRANSITIONS,
+    StatusValidationError,
 )
 from execqueue.runtime import is_test_mode
 
@@ -117,6 +118,8 @@ def update_task_queue_status_endpoint(
                 "queue_status": updated_task.queue_status,
             },
         }
+    except StatusValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -227,6 +230,8 @@ def update_work_package_queue_status_endpoint(
                 "queue_status": updated_wp.queue_status,
             },
         }
+    except StatusValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -253,6 +258,8 @@ def update_requirement_queue_status_endpoint(
                 "queue_status": updated_req.queue_status,
             },
         }
+    except StatusValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://execqueue.example.com/validation-schema/v1",
+  "title": "Task Validation Output Schema",
+  "description": "Schema für die Validierung von Task-Ausgaben in ExecQueue. Version 1.0.0",
+  "version": "1.0.0",
+  "type": "object",
+  "required": ["status", "summary", "evidence"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["done", "not_done"],
+      "description": "Status der Task-Ausführung: 'done' bei Erfolg, 'not_done' bei Bedarf an weitere Iteration"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Zusammenfassung der Ausführung. Bei 'not_done' zwingend erforderlich mit Begründung."
+    },
+    "evidence": {
+      "type": "string",
+      "minLength": 0,
+      "maxLength": 10000,
+      "description": "Konkreter Nachweis der Erledigung (Dateinamen, Zeilennummern, Test-Outputs). Bei 'status: done' nicht-leer erforderlich."
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Optionale Schema-Version für Forward-Compatibility. Default: '1.0.0'",
+      "default": "1.0.0"
+    }
+  },
+  "additionalProperties": false
+}

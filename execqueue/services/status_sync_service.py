@@ -7,12 +7,18 @@ gemäß dem Kanban-Statusmodell (backlog → in_progress → review → done →
 
 from sqlmodel import Session, select
 from typing import Optional, List
+from datetime import datetime, timezone
 from execqueue.models.task import Task
 from execqueue.models.work_package import WorkPackage
 from execqueue.models.requirement import Requirement
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def utcnow() -> datetime:
+    """Returns current datetime in UTC timezone."""
+    return datetime.now(timezone.utc)
 
 # Gültige Status-Übergänge im Kanban-Modell
 VALID_STATUS_TRANSITIONS = {
@@ -128,6 +134,9 @@ def sync_task_status_to_parent(task: Task, session: Session) -> None:
     """
     Synchronisiert den Task-Status auf das Parent-Objekt (WorkPackage oder Requirement).
     
+    HINWEIS: Diese Funktion führt KEIN session.commit() aus. Der Caller kontrolliert
+    die Transaction-Granularität für atomare Updates über alle Entity-Grenzen hinweg.
+    
     Args:
         task: Der Task
         session: Datenbank-Session
@@ -142,11 +151,11 @@ def sync_task_status_to_parent(task: Task, session: Session) -> None:
                 work_package.updated_at = task.updated_at
                 session.add(work_package)
                 logger.debug(
-                    f"Synced WorkPackage {work_package.id} status to '{new_status}' "
-                    f"(via task {task.id})"
+                    "Synced WorkPackage %d status to '%s' (via task %d)",
+                    work_package.id, new_status, task.id
                 )
                 
-                # Auch Requirement aktualisieren
+                # Auch Requirement aktualisieren (ohne commit - Caller macht das)
                 requirement = session.get(Requirement, work_package.requirement_id)
                 if requirement:
                     new_req_status = calculate_requirement_status(requirement, session)
@@ -156,8 +165,8 @@ def sync_task_status_to_parent(task: Task, session: Session) -> None:
                         requirement.updated_at = task.updated_at
                         session.add(requirement)
                         logger.debug(
-                            f"Synced Requirement {requirement.id} status to '{new_req_status}' "
-                            f"(via work package {work_package.id})"
+                            "Synced Requirement %d status to '%s' (via work package %d)",
+                            requirement.id, new_req_status, work_package.id
                         )
                         
     elif task.source_type == "requirement":
@@ -168,20 +177,21 @@ def sync_task_status_to_parent(task: Task, session: Session) -> None:
             requirement.updated_at = task.updated_at
             session.add(requirement)
             logger.debug(
-                f"Synced Requirement {requirement.id} status to '{task.queue_status}' "
-                f"(via task {task.id})"
+                "Synced Requirement %d status to '%s' (via task %d)",
+                requirement.id, task.queue_status, task.id
             )
     
-    session.commit()
+    # KEIN session.commit() hier - Caller kontrolliert Transaction
 
 
-def sync_requirement_status(requirement: Requirement, session: Session) -> Requirement:
+def sync_requirement_status(requirement: Requirement, session: Session, commit: bool = False) -> Requirement:
     """
     Synchronisiert den Requirement-Status basierend auf WorkPackages.
     
     Args:
         requirement: Das Requirement
         session: Datenbank-Session
+        commit: Optional, ob ein Commit durchgeführt werden soll (Default: False)
         
     Returns:
         Aktualisiertes Requirement
@@ -190,23 +200,31 @@ def sync_requirement_status(requirement: Requirement, session: Session) -> Requi
     if requirement.queue_status != new_status:
         validate_status_transition(requirement.queue_status, new_status)
         requirement.queue_status = new_status
-        requirement.updated_at = requirement.updated_at
+        requirement.updated_at = utcnow()
         session.add(requirement)
-        session.commit()
-        logger.info(
-            f"Synced Requirement {requirement.id} status to '{new_status}' "
-            f"(berechnet aus WorkPackages)"
-        )
+        
+        if commit:
+            session.commit()
+            logger.info(
+                "Synced Requirement %d status to '%s' (berechnet aus WorkPackages)",
+                requirement.id, new_status
+            )
+        else:
+            logger.debug(
+                "Prepared Requirement %d status update to '%s' (commit pending)",
+                requirement.id, new_status
+            )
     return requirement
 
 
-def sync_work_package_status(work_package: WorkPackage, session: Session) -> WorkPackage:
+def sync_work_package_status(work_package: WorkPackage, session: Session, commit: bool = False) -> WorkPackage:
     """
     Synchronisiert den WorkPackage-Status basierend auf Tasks.
     
     Args:
         work_package: Das WorkPackage
         session: Datenbank-Session
+        commit: Optional, ob ein Commit durchgeführt werden soll (Default: False)
         
     Returns:
         Aktualisiertes WorkPackage
@@ -215,17 +233,24 @@ def sync_work_package_status(work_package: WorkPackage, session: Session) -> Wor
     if work_package.queue_status != new_status:
         validate_status_transition(work_package.queue_status, new_status)
         work_package.queue_status = new_status
-        work_package.updated_at = work_package.updated_at
+        work_package.updated_at = utcnow()
         session.add(work_package)
-        session.commit()
-        logger.info(
-            f"Synced WorkPackage {work_package.id} status to '{new_status}' "
-            f"(berechnet aus Tasks)"
-        )
+        
+        if commit:
+            session.commit()
+            logger.info(
+                "Synced WorkPackage %d status to '%s' (berechnet aus Tasks)",
+                work_package.id, new_status
+            )
+        else:
+            logger.debug(
+                "Prepared WorkPackage %d status update to '%s' (commit pending)",
+                work_package.id, new_status
+            )
     return work_package
 
 
-def update_task_queue_status(task: Task, new_status: str, session: Session) -> Task:
+def update_task_queue_status(task: Task, new_status: str, session: Session, commit: bool = True) -> Task:
     """
     Aktualisiert den queue_status eines Tasks und synchronisiert auf Parents.
     
@@ -233,31 +258,40 @@ def update_task_queue_status(task: Task, new_status: str, session: Session) -> T
         task: Der Task
         new_status: Neuer Status
         session: Datenbank-Session
+        commit: Optional, ob ein Commit durchgeführt werden soll (Default: True)
         
     Returns:
         Aktualisierter Task
     """
     validate_status_transition(task.queue_status, new_status)
     task.queue_status = new_status
-    task.updated_at = task.updated_at
+    task.updated_at = utcnow()
     session.add(task)
-    session.commit()
-    session.refresh(task)
     
-    # Parent synchronisieren
+    # Parent synchronisieren (ohne Commit)
     sync_task_status_to_parent(task, session)
     
-    logger.info(
-        f"Updated Task {task.id} queue_status to '{new_status}' "
-        f"(source_type: {task.source_type})"
-    )
+    if commit:
+        session.commit()
+        session.refresh(task)
+        logger.info(
+            "Updated Task %d queue_status to '%s' (source_type: %s)",
+            task.id, new_status, task.source_type
+        )
+    else:
+        logger.debug(
+            "Prepared Task %d queue_status update to '%s' (commit pending)",
+            task.id, new_status
+        )
+    
     return task
 
 
 def update_work_package_queue_status(
     work_package: WorkPackage, 
     new_status: str, 
-    session: Session
+    session: Session,
+    commit: bool = True
 ) -> WorkPackage:
     """
     Aktualisiert den queue_status eines WorkPackages und synchronisiert auf Requirement.
@@ -266,30 +300,39 @@ def update_work_package_queue_status(
         work_package: Das WorkPackage
         new_status: Neuer Status
         session: Datenbank-Session
+        commit: Optional, ob ein Commit durchgeführt werden soll (Default: True)
         
     Returns:
         Aktualisiertes WorkPackage
     """
     validate_status_transition(work_package.queue_status, new_status)
     work_package.queue_status = new_status
-    work_package.updated_at = work_package.updated_at
+    work_package.updated_at = utcnow()
     session.add(work_package)
-    session.commit()
-    session.refresh(work_package)
     
-    # Requirement synchronisieren
+    # Requirement synchronisieren (ohne Commit)
     requirement = session.get(Requirement, work_package.requirement_id)
     if requirement:
-        sync_requirement_status(requirement, session)
+        sync_requirement_status(requirement, session, commit=False)
     
-    logger.info(f"Updated WorkPackage {work_package.id} queue_status to '{new_status}'")
+    if commit:
+        session.commit()
+        session.refresh(work_package)
+        logger.info("Updated WorkPackage %d queue_status to '%s'", work_package.id, new_status)
+    else:
+        logger.debug(
+            "Prepared WorkPackage %d queue_status update to '%s' (commit pending)",
+            work_package.id, new_status
+        )
+    
     return work_package
 
 
 def update_requirement_queue_status(
     requirement: Requirement, 
     new_status: str, 
-    session: Session
+    session: Session,
+    commit: bool = True
 ) -> Requirement:
     """
     Aktualisiert den queue_status eines Requirements.
@@ -298,18 +341,26 @@ def update_requirement_queue_status(
         requirement: Das Requirement
         new_status: Neuer Status
         session: Datenbank-Session
+        commit: Optional, ob ein Commit durchgeführt werden soll (Default: True)
         
     Returns:
         Aktualisiertes Requirement
     """
     validate_status_transition(requirement.queue_status, new_status)
     requirement.queue_status = new_status
-    requirement.updated_at = requirement.updated_at
+    requirement.updated_at = utcnow()
     session.add(requirement)
-    session.commit()
-    session.refresh(requirement)
     
-    logger.info(f"Updated Requirement {requirement.id} queue_status to '{new_status}'")
+    if commit:
+        session.commit()
+        session.refresh(requirement)
+        logger.info("Updated Requirement %d queue_status to '%s'", requirement.id, new_status)
+    else:
+        logger.debug(
+            "Prepared Requirement %d queue_status update to '%s' (commit pending)",
+            requirement.id, new_status
+        )
+    
     return requirement
 
 

@@ -17,9 +17,9 @@ from execqueue.models.task import Task
 class TestQueueStatusEndpoints:
     """Tests for queue status and management endpoints."""
 
-    def test_get_queue_status(self, client: TestClient, db_session: Session):
-        """Test: GET /queue/status returns queue state."""
-        response = client.get("/queue/status")
+    def test_get_queue_status(self, client: TestClient):
+        """Test: GET /api/queue/status returns queue state."""
+        response = client.get("/api/queue/status")
         
         assert response.status_code == 200
         data = response.json()
@@ -27,9 +27,9 @@ class TestQueueStatusEndpoints:
         assert "parallel_task_count" in data
         assert "is_test_mode" in data
 
-    def test_get_kanban_board(self, client: TestClient, db_session: Session):
-        """Test: GET /queue/kanban returns Kanban overview."""
-        response = client.get("/queue/kanban")
+    def test_get_kanban_board(self, client: TestClient):
+        """Test: GET /api/queue/kanban returns Kanban overview."""
+        response = client.get("/api/queue/kanban")
         
         assert response.status_code == 200
         data = response.json()
@@ -38,8 +38,8 @@ class TestQueueStatusEndpoints:
         assert "requirements" in data
 
     def test_get_valid_transitions(self, client: TestClient):
-        """Test: GET /queue/valid-transitions returns valid status transitions."""
-        response = client.get("/queue/valid-transitions")
+        """Test: GET /api/queue/valid-transitions returns valid status transitions."""
+        response = client.get("/api/queue/valid-transitions")
         
         assert response.status_code == 200
         data = response.json()
@@ -54,12 +54,12 @@ class TestTaskQueueStatusEndpoints:
     """Tests for task queue status update endpoints."""
 
     def test_update_task_queue_status_success(
-        self, client: TestClient, db_session: Session, sample_task
+        self, client: TestClient, sample_task
     ):
-        """Test: PATCH /queue/tasks/{id}/queue-status updates status."""
+        """Test: PATCH /api/queue/tasks/{id}/queue-status updates status."""
         payload = {"queue_status": "in_progress"}
         response = client.patch(
-            f"/queue/tasks/{sample_task.id}/queue-status",
+            f"/api/queue/tasks/{sample_task.id}/queue-status",
             json=payload
         )
         
@@ -69,12 +69,12 @@ class TestTaskQueueStatusEndpoints:
         assert data["task"]["queue_status"] == "in_progress"
 
     def test_update_task_queue_status_invalid_transition(
-        self, client: TestClient, db_session: Session, sample_task
+        self, client: TestClient, sample_task
     ):
         """Test: PATCH rejects invalid status transitions."""
         payload = {"queue_status": "done"}  # Can't go directly from backlog to done
         response = client.patch(
-            f"/queue/tasks/{sample_task.id}/queue-status",
+            f"/api/queue/tasks/{sample_task.id}/queue-status",
             json=payload
         )
         
@@ -84,15 +84,15 @@ class TestTaskQueueStatusEndpoints:
     def test_update_task_queue_status_not_found(self, client: TestClient):
         """Test: PATCH returns 404 for non-existent task."""
         payload = {"queue_status": "in_progress"}
-        response = client.patch("/queue/tasks/99999/queue-status", json=payload)
+        response = client.patch("/api/queue/tasks/99999/queue-status", json=payload)
         
         assert response.status_code == 404
 
-    def test_update_task_block_queue(self, client: TestClient, db_session: Session, sample_task):
-        """Test: PATCH /queue/tasks/{id}/block-queue toggles block flag."""
+    def test_update_task_block_queue(self, client: TestClient, sample_task):
+        """Test: PATCH /api/queue/tasks/{id}/block-queue toggles block flag."""
         payload = {"block_queue": True}
         response = client.patch(
-            f"/queue/tasks/{sample_task.id}/block-queue",
+            f"/api/queue/tasks/{sample_task.id}/block-queue",
             json=payload
         )
         
@@ -101,11 +101,11 @@ class TestTaskQueueStatusEndpoints:
         assert data["message"] == "Queue blocked"
         assert data["task"]["block_queue"] is True
 
-    def test_update_task_schedulable(self, client: TestClient, db_session: Session, sample_task):
-        """Test: PATCH /queue/tasks/{id}/toggle-schedulable updates flag."""
+    def test_update_task_schedulable(self, client: TestClient, sample_task):
+        """Test: PATCH /api/queue/tasks/{id}/toggle-schedulable updates flag."""
         payload = {"schedulable": False}
         response = client.patch(
-            f"/queue/tasks/{sample_task.id}/toggle-schedulable",
+            f"/api/queue/tasks/{sample_task.id}/toggle-schedulable",
             json=payload
         )
         
@@ -113,11 +113,11 @@ class TestTaskQueueStatusEndpoints:
         data = response.json()
         assert data["task"]["schedulable"] is False
 
-    def test_update_task_parallelization(self, client: TestClient, db_session: Session, sample_task):
-        """Test: PATCH /queue/tasks/{id}/parallelization updates flag."""
+    def test_update_task_parallelization(self, client: TestClient, sample_task):
+        """Test: PATCH /api/queue/tasks/{id}/parallelization updates flag."""
         payload = {"parallelization_allowed": False}
         response = client.patch(
-            f"/queue/tasks/{sample_task.id}/parallelization",
+            f"/api/queue/tasks/{sample_task.id}/parallelization",
             json=payload
         )
         
@@ -130,12 +130,12 @@ class TestWorkPackageQueueEndpoints:
     """Tests for work package queue endpoints."""
 
     def test_update_work_package_queue_status(
-        self, client: TestClient, db_session: Session, sample_work_package
+        self, client: TestClient, sample_work_package
     ):
-        """Test: PATCH /queue/work-packages/{id}/queue-status updates status."""
+        """Test: PATCH /api/queue/work-packages/{id}/queue-status updates status."""
         payload = {"queue_status": "in_progress"}
         response = client.patch(
-            f"/queue/work-packages/{sample_work_package.id}/queue-status",
+            f"/api/queue/work-packages/{sample_work_package.id}/queue-status",
             json=payload
         )
         
@@ -143,9 +143,9 @@ class TestWorkPackageQueueEndpoints:
         data = response.json()
         assert data["message"] == "WorkPackage queue_status updated"
 
-    def test_enqueue_work_package(self, client: TestClient, db_session: Session, sample_work_package):
-        """Test: POST /queue/enqueue-work-package/{id} creates task."""
-        response = client.post(f"/queue/enqueue-work-package/{sample_work_package.id}")
+    def test_enqueue_work_package(self, client: TestClient, sample_work_package):
+        """Test: POST /api/queue/enqueue-work-package/{id} creates task."""
+        response = client.post(f"/api/queue/enqueue-work-package/{sample_work_package.id}")
         
         assert response.status_code == 200
         data = response.json()
@@ -157,12 +157,12 @@ class TestRequirementQueueEndpoints:
     """Tests for requirement queue endpoints."""
 
     def test_update_requirement_queue_status(
-        self, client: TestClient, db_session: Session, sample_requirement
+        self, client: TestClient, sample_requirement
     ):
-        """Test: PATCH /queue/requirements/{id}/queue-status updates status."""
+        """Test: PATCH /api/queue/requirements/{id}/queue-status updates status."""
         payload = {"queue_status": "in_progress"}
         response = client.patch(
-            f"/queue/requirements/{sample_requirement.id}/queue-status",
+            f"/api/queue/requirements/{sample_requirement.id}/queue-status",
             json=payload
         )
         
@@ -175,7 +175,7 @@ class TestQueueBlocking:
     """Tests for queue blocking functionality."""
 
     def test_queue_blocked_returns_true_when_blocking_task_exists(
-        self, client: TestClient, db_session: Session
+        self, client: TestClient, db_session
     ):
         """Test: Queue status shows blocked when blocking task exists."""
         # Create a blocking task
@@ -191,13 +191,13 @@ class TestQueueBlocking:
         db_session.add(blocking_task)
         db_session.commit()
 
-        response = client.get("/queue/status")
+        response = client.get("/api/queue/status")
         data = response.json()
         
         assert data["queue_blocked"] is True
 
     def test_queue_not_blocked_when_no_blocking_tasks(
-        self, client: TestClient, db_session: Session
+        self, client: TestClient, db_session
     ):
         """Test: Queue status shows not blocked when no blocking tasks."""
         # Create a non-blocking task
@@ -213,7 +213,7 @@ class TestQueueBlocking:
         db_session.add(normal_task)
         db_session.commit()
 
-        response = client.get("/queue/status")
+        response = client.get("/api/queue/status")
         data = response.json()
         
         assert data["queue_blocked"] is False

@@ -95,6 +95,41 @@ opencode_api_errors_total = Counter(
 )
 
 # ============================================================================
+# Validation Metrics (REQ-VAL-011)
+# ============================================================================
+
+# Counter: Validation success/failure
+validation_results_total = Counter(
+    "execqueue_validation_results_total",
+    "Total number of validation results",
+    ["status", "error_type"],  # status: success/failure, error_type: parsing/semantic/critical/none
+    registry=REGISTRY,
+)
+
+# Histogram: Validation duration (seconds)
+validation_duration_seconds = Histogram(
+    "execqueue_validation_duration_seconds",
+    "Time spent validating a task (seconds)",
+    buckets=(0.01, 0.05, 0.1, 0.5, 1, 2, 5),
+    registry=REGISTRY,
+)
+
+# Counter: Validation retries by error type
+validation_retries_total = Counter(
+    "execqueue_validation_retries_total",
+    "Total number of validation retries by error type",
+    ["error_type"],  # parsing, semantic, critical
+    registry=REGISTRY,
+)
+
+# Gauge: Current validation queue size (tasks waiting for validation retry)
+validation_queue_length = Gauge(
+    "execqueue_validation_queue_length",
+    "Number of tasks waiting for validation retry",
+    registry=REGISTRY,
+)
+
+# ============================================================================
 # Worker Metrics
 # ============================================================================
 
@@ -141,6 +176,27 @@ def increment_error(error_type: str):
 def increment_opencode_error(status_code: str):
     """Increment OpenCode API error counter."""
     opencode_api_errors_total.labels(status_code=status_code).inc()
+
+
+def increment_validation_result(status: str, error_type: str = "none"):
+    """
+    Increment validation result counter.
+    
+    Args:
+        status: "success" or "failure"
+        error_type: "parsing", "semantic", "critical", or "none"
+    """
+    validation_results_total.labels(status=status, error_type=error_type).inc()
+
+
+def observe_validation_duration(duration_seconds: float):
+    """Record validation duration."""
+    validation_duration_seconds.observe(duration_seconds)
+
+
+def increment_validation_retry(error_type: str):
+    """Increment validation retry counter by error type."""
+    validation_retries_total.labels(error_type=error_type).inc()
 
 
 @router.get("/metrics")

@@ -1,4 +1,4 @@
-from sqlmodel import Session, select, or_, and_
+from sqlmodel import Session, select, or_, and_, func
 from typing import Optional
 from execqueue.models.requirement import Requirement
 from execqueue.models.work_package import WorkPackage
@@ -29,14 +29,16 @@ def check_queue_blocked(session: Session, is_test: bool) -> bool:
 
 def get_parallel_task_count(session: Session, is_test: bool) -> int:
     """Zählt die Anzahl aktuell paralleler Tasks."""
-    return session.exec(
-        select(Task)
+    statement = (
+        select(func.count(Task.id))
         .where(
             Task.parallelization_allowed == True,
             Task.status.in_(["queued", "in_progress"]),
             Task.is_test == is_test,
         )
-    ).count()
+    )
+    result = session.exec(statement).one()
+    return result or 0
 
 
 def validate_dependencies(work_package: WorkPackage, session: Session) -> bool:

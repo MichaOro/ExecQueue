@@ -1,0 +1,145 @@
+# Validation Policy Configuration
+# ExecQueue - Validation Hardening
+# 
+# Diese Datei definiert die Retry-Policies und Konfigurationsparameter
+# für die Task-Validierung. Erfüllt REQ-VAL-013 (Policy-Based Validation).
+#
+# Environment-spezifische Überschreibungen:
+# - development: Laxere Limits, kürzere Backoffs
+# - production: Strengere Limits, längere Backoffs
+# - test: Minimalistische Policies für CI/CD
+
+# Globale Validierungs-Konfiguration
+validation:
+  # Evidence Mindestlänge (Zeichen)
+  evidence_min_length: 10
+  
+  # Evidence ist erforderlich bei status=done
+  evidence_required_for_done: true
+  
+  # Strenger Modus (alle Warnungen werden zu Fehlern)
+  strict_mode: false
+  
+  # Schema-Version für Validierung
+  schema_version: "1.0.0"
+
+# Retry-Policies pro Fehlertyp
+retry_policies:
+  # Parsing-Fehler (JSON-Schema-Validierung fehlgeschlagen)
+  parsing:
+    max_retries: 3
+    base_backoff_seconds: 5
+    max_backoff_seconds: 60
+    jitter_percent: 20
+    description: "Parsing-Fehler - sofortiger Retry mit Parsing-Hilfe"
+    
+    # Prompt-Verbesserung für Parsing-Fehler
+    prompt_enhancement: |
+      Dein Output war nicht als valides JSON formatierbar. 
+      Bitte gib EXAKT folgendes JSON-Format zurück, ohne zusätzlichen Text:
+      {
+        "status": "done" oder "not_done",
+        "summary": "Kurze Zusammenfassung",
+        "evidence": "Konkrete Nachweise"
+      }
+      Verwende keine Markdown-Code-Blöcke, gib nur das JSON zurück.
+
+  # Semantische Fehler (Inhaltliche Probleme)
+  semantic:
+    max_retries: 3
+    base_backoff_seconds: 10
+    max_backoff_seconds: 120
+    jitter_percent: 25
+    description: "Semantische Fehler - Retry mit verbessertem Prompt"
+    
+    # Prompt-Verbesserung für semantische Fehler
+    prompt_enhancement: |
+      Dein Output erfüllt die inhaltlichen Anforderungen nicht.
+      
+      Häufige Probleme:
+      - Bei status="done": evidence-Feld ist leer oder zu kurz
+      - Bei status="not_done": summary enthält keine Begründung
+      
+      Bitte prüfe:
+      1. Ist der Task wirklich abgeschlossen?
+      2. Hast du konkrete Nachweise (Dateinamen, Zeilennummern, Test-Outputs)?
+      3. Bei "not_done": Hast du erklärt WARUM der Task nicht abgeschlossen werden konnte?
+
+  # Kritische Fehler (nicht retry-fähig)
+  critical:
+    max_retries: 0
+    base_backoff_seconds: 0
+    max_backoff_seconds: 0
+    jitter_percent: 0
+    description: "Kritische Fehler - kein Retry, direkter Failed-Status"
+    
+    # Kritische Fehler führen sofort zu Task-Failure
+    auto_fail: true
+
+# Eskalations-Konfiguration
+escalation:
+  # Anzahl der Retries vor Eskalation
+  retry_threshold: 3
+  
+  # Eskalation an manuelle Review Queue
+  manual_review_enabled: true
+  
+  # Notification bei Eskalation
+  notification:
+    enabled: true
+    channels: ["log", "webhook"]  # Optionen: log, webhook, telegram
+    webhook_url: "${ESCALATION_WEBHOOK_URL:-}"
+    
+# Metriken-Konfiguration
+metrics:
+  enabled: true
+  include_details: true
+  retention_days: 30
+
+# Circuit Breaker für External Validation Services
+circuit_breaker:
+  enabled: false
+  failure_threshold: 5
+  recovery_timeout_seconds: 60
+  half_open_requests: 3
+
+# Environment-spezifische Überschreibungen
+environments:
+  development:
+    validation:
+      strict_mode: false
+      evidence_min_length: 5
+    retry_policies:
+      parsing:
+        max_retries: 5
+        base_backoff_seconds: 2
+      semantic:
+        max_retries: 5
+        base_backoff_seconds: 5
+  
+  test:
+    validation:
+      strict_mode: false
+      evidence_min_length: 1
+    retry_policies:
+      parsing:
+        max_retries: 1
+        base_backoff_seconds: 0
+      semantic:
+        max_retries: 1
+        base_backoff_seconds: 0
+  
+  production:
+    validation:
+      strict_mode: true
+      evidence_min_length: 20
+    retry_policies:
+      parsing:
+        max_retries: 2
+        base_backoff_seconds: 10
+      semantic:
+        max_retries: 2
+        base_backoff_seconds: 15
+    escalation:
+      retry_threshold: 2
+      manual_review_enabled: true

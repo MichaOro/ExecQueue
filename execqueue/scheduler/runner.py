@@ -20,7 +20,13 @@ from execqueue.runtime import (
     get_worker_lock_timeout_seconds,
     get_opencode_session_timeout,
 )
-from execqueue.validation.task_validator import validate_task_result
+from execqueue.validation.task_validator import validate_task_result, ValidationErrorType
+from execqueue.validation.policy_loader import (
+    get_retry_policy,
+    calculate_backoff_seconds,
+    should_retry,
+    should_escalate,
+)
 from execqueue.workers.opencode_adapter import execute_with_opencode, OpenCodeACPClient
 from execqueue.services.opencode_session_service import OpenCodeSessionService
 from execqueue.services.status_sync_service import sync_task_status_to_parent
@@ -126,6 +132,49 @@ def get_parallel_task_count(session: Session, is_test: bool) -> int:
     return count
 
 
+def _check_task_dependencies(task: Task, session: Session) -> bool:
+    """
+    Prüft ob alle Dependencies eines Tasks erfüllt sind.
+    
+    Args:
+        task: Der zu prüfende Task
+        session: Datenbank-Session
+        
+    Returns:
+        True wenn alle Dependencies erfüllt sind oder keine existieren, False sonst
+    """
+    if task.source_type != "work_package":
+        # Nur WorkPackages haben Dependencies
+        return True
+    
+    work_package = session.get(WorkPackage, task.source_id)
+    if not work_package or not work_package.dependency_id:
+        # Kein WorkPackage oder keine Dependency - kann verarbeitet werden
+        return True
+    
+    # Dependency-WorkPackage laden und prüfen
+    dependency = session.get(WorkPackage, work_package.dependency_id)
+    if not dependency:
+        logger.warning(
+            "Dependency not found for work_package %d (dependency_id: %d)",
+            work_package.id, work_package.dependency_id
+        )
+        return False
+    
+    if dependency.queue_status != "done":
+        logger.debug(
+            "Task %d blocked by dependency: WorkPackage %d is in status '%s' (not 'done')",
+            task.id, dependency.id, dependency.queue_status
+        )
+        return False
+    
+    logger.debug(
+        "Task %d dependency satisfied: WorkPackage %d is 'done'",
+        task.id, dependency.id
+    )
+    return True
+
+
 def get_next_queued_task(session: Session) -> Optional[Task]:
     """
     Get next queued task and lock it for processing.
@@ -137,6 +186,7 @@ def get_next_queued_task(session: Session) -> Optional[Task]:
     - block_queue: Wenn True, keine weiteren Tasks verarbeiten
     - schedulable: Nur Tasks mit schedulable=True vom Scheduler verarbeiten
     - parallelization_allowed: Berücksichtigung bei paralleler Ausführung
+    - dependency_id: WorkPackages mit Dependencies warten auf Erfüllung
     
     Returns:
         Task if available and successfully locked, None otherwise
@@ -169,14 +219,18 @@ def get_next_queued_task(session: Session) -> Optional[Task]:
             (Task.scheduled_after == None) | (Task.scheduled_after <= current_time),
         )
         .order_by(Task.execution_order, Task.id)
-        .limit(1)
+        .limit(10)  # Mehrere Tasks holen und Dependencies prüfen
         .with_for_update()  # Pessimistic lock to prevent race conditions
     )
     
-    task = session.exec(statement).first()
+    candidate_tasks = session.exec(statement).all()
     
-    if task:
-        # Lock the task atomically
+    # Durchlaufe Kandidaten und prüfe Dependencies
+    for task in candidate_tasks:
+        if not _check_task_dependencies(task, session):
+            continue  # Dependency nicht erfüllt, nächster Kandidat
+        
+        # Dependency erfüllt - Task locken
         task.locked_at = current_time
         task.locked_by = WORKER_INSTANCE_ID
         task.updated_at = current_time
@@ -189,8 +243,11 @@ def get_next_queued_task(session: Session) -> Optional[Task]:
             "Locked task %d for processing (worker: %s, status: %s, queue_status: %s)",
             task.id, WORKER_INSTANCE_ID, task.status, task.queue_status
         )
+        
+        return task
     
-    return task
+    # Keine passenden Tasks gefunden
+    return None
 
 
 def _mark_task_in_progress(task: Task, session: Session) -> Task:
@@ -213,10 +270,14 @@ def _mark_task_done(task: Task, result_text: str, session: Session) -> Task:
     # Clear lock on completion
     task.locked_at = None
     task.locked_by = None
-    _commit_and_refresh(session, task)
+    session.add(task)
     
-    # Parent-Status synchronisieren
+    # Parent-Status synchronisieren (ohne Commit - wir machen es danach)
     sync_task_status_to_parent(task, session)
+    
+    # Atomic commit aller Änderungen
+    session.commit()
+    session.refresh(task)
     
     logger.info(
         "Task %d completed, lock released (was locked by: %s, queue_status: %s)",
@@ -288,13 +349,22 @@ def _requeue_or_fail_task(task: Task, result_text: str, session: Session) -> Tas
 
 
 def _mark_source_done(task: Task, session: Session) -> None:
+    """
+    Markiert die Source-Entität (WorkPackage oder Requirement) als done.
+    
+    HINWEIS: Diese Funktion führt KEIN commit aus. Der Caller kontrolliert
+    die Transaction-Granularität.
+    
+    Args:
+        task: Der abgeschlossene Task
+        session: Datenbank-Session
+    """
     if task.source_type == "work_package":
         work_package = session.get(WorkPackage, task.source_id)
         if work_package:
             work_package.status = "done"
             work_package.updated_at = utcnow()
             session.add(work_package)
-            session.commit()
 
             requirement = session.get(Requirement, work_package.requirement_id)
             if requirement:
@@ -309,7 +379,6 @@ def _mark_source_done(task: Task, session: Session) -> None:
                     requirement.status = "done"
                     requirement.updated_at = utcnow()
                     session.add(requirement)
-                    session.commit()
 
     elif task.source_type == "requirement":
         requirement = session.get(Requirement, task.source_id)
@@ -317,7 +386,7 @@ def _mark_source_done(task: Task, session: Session) -> None:
             requirement.status = "done"
             requirement.updated_at = utcnow()
             session.add(requirement)
-            session.commit()
+    # KEIN commit hier - Caller macht das
 
 
 def run_task(task_id: int, session: Session) -> Task:
@@ -373,14 +442,18 @@ def run_task(task_id: int, session: Session) -> Task:
             # Check if session is complete
             if task.opencode_status.value == "completed":
                 task = session_service.complete_session(session, task)
+                # Atomic commit for source done
                 _mark_source_done(task, session)
+                session.commit()
                 metrics.increment_task_processed("done")
                 return task
             elif task.opencode_status.value == "failed":
+                session.commit()
                 metrics.increment_task_processed("failed")
                 return task
             else:
                 # Session still running, return for later processing
+                session.commit()
                 metrics.increment_task_processed("running")
                 return task
         else:
@@ -393,17 +466,109 @@ def run_task(task_id: int, session: Session) -> Task:
             duration = time.time() - start_time
             metrics.observe_task_duration(duration)
 
-            validation = validate_task_result(execution_result.raw_output)
-
+            validation = validate_task_result(
+                execution_result.raw_output,
+                retry_count=task.retry_count
+            )
+            
+            # Validation Metrics erfassen
+            validation_duration = time.time() - start_time  # Näherung
             if validation.is_done:
-                task = _mark_task_done(task, execution_result.raw_output, session)
+                metrics.increment_validation_result("success", "none")
+            else:
+                metrics.increment_validation_result("failure", validation.error_type)
+                metrics.increment_validation_retry(validation.error_type)
+            metrics.observe_validation_duration(validation_duration)
+
+            # Logging des Validierungsergebnisses
+            logger.info(
+                "Task %d validation result: is_done=%s, error_type=%s, passes=%s",
+                task.id,
+                validation.is_done,
+                validation.error_type,
+                validation.validation_passes
+            )
+            
+            if validation.is_done:
+                # Atomic update: Task done + Source done + Status sync
+                task.status = "done"
+                task.last_result = execution_result.raw_output
+                task.updated_at = utcnow()
+                task.queue_status = "done"
+                task.locked_at = None
+                task.locked_by = None
+                session.add(task)
+                
+                # Synchronize to parent entities
+                sync_task_status_to_parent(task, session)
                 _mark_source_done(task, session)
+                
+                # Atomic commit
+                session.commit()
+                session.refresh(task)
+                
                 metrics.increment_task_processed("done")
                 return task
 
+            # Validierung fehlgeschlagen - differenzierte Retry-Logik
             metrics.increment_task_processed("retry")
             metrics.increment_task_retry(task.source_type)
-            return _requeue_or_fail_task(task, execution_result.raw_output, session)
+            
+            # Kritische Fehler - direkter Fail ohne Retry
+            if validation.error_type == ValidationErrorType.CRITICAL:
+                logger.error(
+                    "Task %d critical validation failure: %s",
+                    task.id,
+                    validation.error_details
+                )
+                task.status = "failed"
+                task.last_result = f"Critical validation error: {'; '.join(validation.error_details)}"
+                _create_dlq_entry(task, session)
+                _commit_and_refresh(session, task)
+                return task
+            
+            # Retry-Logik mit differenziertem Backoff
+            task.last_result = execution_result.raw_output
+            task.updated_at = utcnow()
+            
+            # Berechne Backoff basierend auf Fehlertyp
+            backoff_delay = validation.backoff_seconds
+            task.retry_count += 1
+            
+            if task.retry_count >= task.max_retries:
+                # Max Retries erreicht - DLQ
+                logger.warning(
+                    "Task %d max retries exceeded after %d retries (error_type: %s)",
+                    task.id,
+                    task.retry_count,
+                    validation.error_type
+                )
+                task.status = "failed"
+                task.scheduled_after = None
+                task.locked_at = None
+                task.locked_by = None
+                _create_dlq_entry(task, session)
+            else:
+                # Requeue mit Backoff
+                task.status = "queued"
+                task.scheduled_after = datetime.fromtimestamp(
+                    utcnow().timestamp() + backoff_delay, timezone.utc
+                )
+                task.locked_at = None
+                task.locked_by = None
+                
+                logger.info(
+                    "Task %d retry %d/%d (error_type: %s), backoff: %.2fs, available: %s",
+                    task.id,
+                    task.retry_count,
+                    task.max_retries,
+                    validation.error_type,
+                    backoff_delay,
+                    task.scheduled_after.isoformat()
+                )
+            
+            _commit_and_refresh(session, task)
+            return task
             
     except Exception as e:
         duration = time.time() - start_time
