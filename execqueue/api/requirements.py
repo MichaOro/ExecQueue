@@ -1,20 +1,30 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
-from execqueue.db.engine import get_session
-from execqueue.models import Requirement
+from execqueue.db.session import get_session
+from execqueue.models.requirement import Requirement
 from execqueue.runtime import is_test_mode
 
-router = APIRouter(prefix="/requirements", tags=["requirements"])
+router = APIRouter()
 
 
 @router.get("/")
-def get_requirements(session: Session = Depends(get_session)):
-    statement = select(Requirement).where(Requirement.is_test == is_test_mode())
-    return session.exec(statement).all()
+def list_requirements(session: Session = Depends(get_session)):
+    requirements = session.exec(
+        select(Requirement).where(Requirement.is_test == is_test_mode())
+    ).all()
+    return [
+        {
+            "id": r.id,
+            "title": r.title,
+            "description": r.description,
+            "status": r.status,
+        }
+        for r in requirements
+    ]
 
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post("/")
 def create_requirement(req: Requirement, session: Session = Depends(get_session)):
     req.is_test = is_test_mode()
     session.add(req)

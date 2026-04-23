@@ -1,20 +1,30 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
-from execqueue.db.engine import get_session
+from execqueue.db.session import get_session
 from execqueue.models.work_package import WorkPackage
 from execqueue.runtime import is_test_mode
 
-router = APIRouter(prefix="/work-packages", tags=["work-packages"])
+router = APIRouter()
 
 
 @router.get("/")
-def get_work_packages(session: Session = Depends(get_session)):
-    statement = select(WorkPackage).where(WorkPackage.is_test == is_test_mode())
-    return session.exec(statement).all()
+def list_work_packages(session: Session = Depends(get_session)):
+    wps = session.exec(
+        select(WorkPackage).where(WorkPackage.is_test == is_test_mode())
+    ).all()
+    return [
+        {
+            "id": w.id,
+            "title": w.title,
+            "requirement_id": w.requirement_id,
+            "status": w.status,
+        }
+        for w in wps
+    ]
 
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post("/")
 def create_work_package(wp: WorkPackage, session: Session = Depends(get_session)):
     wp.is_test = is_test_mode()
     session.add(wp)

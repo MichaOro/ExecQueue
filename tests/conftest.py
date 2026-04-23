@@ -1,11 +1,18 @@
 import os
+import time
 from pathlib import Path
 from typing import Generator, Any
 from unittest.mock import MagicMock
 
 import pytest
 from dotenv import dotenv_values
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import SQLModel, Session, create_engine, select
+
+from execqueue.models.task import Task
+from execqueue.models.requirement import Requirement
+from execqueue.models.work_package import WorkPackage
+from execqueue.models.dead_letter import DeadLetterQueue
+from execqueue.db.engine import engine
 
 DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 DOTENV_VALUES = dotenv_values(DOTENV_PATH) if DOTENV_PATH.exists() else {}
@@ -16,214 +23,36 @@ TEST_DATABASE_URL = (
     or DOTENV_VALUES.get("TEST_DATABASE_URL")
     or DOTENV_VALUES.get("DATABASE_URL")
 )
-TEST_QUEUE_PREFIX = (
-    os.getenv("TEST_QUEUE_PREFIX")
-    or DOTENV_VALUES.get("TEST_QUEUE_PREFIX")
-    or "test_"
-)
+
+TEST_QUEUE_PREFIX = os.getenv("TEST_QUEUE_PREFIX", "test_")
 TEST_ID_START = 9000
-SQLITE_FALLBACK_URL = "sqlite:///:memory:"
-HAS_CONFIGURED_TEST_DB = bool(TEST_DATABASE_URL)
-DB_REQUIRED_FIXTURES = {
-    "db_session",
-    "test_engine",
-    "session_scope",
-    "api_client",
-    "e2e_client",
-    "session_with_data",
-    "sample_requirement",
-    "sample_work_package",
-    "sample_task",
-    "sample_task_queue",
-}
-
-if TEST_DATABASE_URL:
-    os.environ.setdefault("DATABASE_URL", TEST_DATABASE_URL)
-    os.environ.setdefault("TEST_DATABASE_URL", TEST_DATABASE_URL)
-else:
-    # Keep imports working even when DB-backed tests are skipped.
-    os.environ.setdefault("DATABASE_URL", SQLITE_FALLBACK_URL)
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line(
-        "markers",
-        "requires_db: test needs a configured external database connection",
-    )
-
-
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
-    if HAS_CONFIGURED_TEST_DB:
-        return
-
-    skip_marker = pytest.mark.skip(
-        reason="requires configured TEST_DATABASE_URL or DATABASE_URL"
-    )
-
-    for item in items:
-        if DB_REQUIRED_FIXTURES.intersection(item.fixturenames):
-            item.add_marker(pytest.mark.requires_db)
-            item.add_marker(skip_marker)
-
-
-@pytest.fixture(scope="session")
-def test_engine() -> Any:
-    """Create a test engine only when a real test DB is configured."""
-    if not TEST_DATABASE_URL:
-        pytest.skip("requires configured TEST_DATABASE_URL or DATABASE_URL")
-
-    engine_kwargs: dict[str, Any] = {"echo": False}
-
-    if "neon.tech" in TEST_DATABASE_URL:
-        engine_kwargs["connect_args"] = {"sslmode": "require"}
-
-    engine = create_engine(
-        TEST_DATABASE_URL,
-        **engine_kwargs,
-    )
-    SQLModel.metadata.create_all(engine)
-    return engine
 
 
 @pytest.fixture(autouse=True)
-def enable_test_queue_mode(monkeypatch: pytest.MonkeyPatch):
+def setup_test_environment(monkeypatch):
+    """Set up test environment."""
     monkeypatch.setenv("EXECQUEUE_TEST_MODE", "true")
-    monkeypatch.setenv("TEST_QUEUE_PREFIX", TEST_QUEUE_PREFIX)
+    monkeypatch.setenv("TEST_QUEUE_PREFIX", "test_")
+    yield
 
 
 @pytest.fixture
-def db_session(test_engine: Any) -> Generator[Session, None, None]:
-    """Function-scoped session with automatic rollback and cleanup after each test.
-    
-    Provides isolated tests - each test gets a clean state.
-    Only deletes test data (is_test=True) to preserve production data.
-    """
-    from sqlmodel import delete
-    from execqueue.models.requirement import Requirement
-    from execqueue.models.work_package import WorkPackage
-    from execqueue.models.task import Task
-
-    with Session(test_engine) as session:
-        session.exec(delete(WorkPackage).where(WorkPackage.is_test == True))
-        session.exec(delete(Task).where(Task.is_test == True))
-        session.exec(delete(Requirement).where(Requirement.is_test == True))
-        session.commit()
-        
+def db_session():
+    """Create a database session for testing."""
+    with Session(engine) as session:
         yield session
-        session.rollback()
 
 
 @pytest.fixture
-def session_scope(test_engine: Any) -> Generator[Session, None, None]:
-    """Session-scoped transaction with rollback.
-    
-    Faster than function-scoped but less isolated.
-    Use when tests within a file can share state.
-    Only deletes test data (is_test=True) to preserve production data.
-    """
-    from sqlmodel import delete
-    from execqueue.models.requirement import Requirement
-    from execqueue.models.work_package import WorkPackage
-    from execqueue.models.task import Task
-
-    with Session(test_engine) as session:
-        session.exec(delete(WorkPackage).where(WorkPackage.is_test == True))
-        session.exec(delete(Task).where(Task.is_test == True))
-        session.exec(delete(Requirement).where(Requirement.is_test == True))
-        session.commit()
-        
-        yield session
-        session.rollback()
-
-
-@pytest.fixture
-def mock_opencode_success() -> MagicMock:
-    """Mock that always returns success ('done')."""
-    mock = MagicMock()
-    mock.return_value = "done"
-    return mock
-
-
-@pytest.fixture
-def mock_opencode_failure() -> MagicMock:
-    """Mock that always returns failure ('not_done')."""
-    mock = MagicMock()
-    mock.return_value = "not_done"
-    return mock
-
-
-@pytest.fixture
-def mock_opencode_flaky() -> MagicMock:
-    """Mock that alternates between success and failure.
-    
-    Useful for testing retry logic.
-    """
-    call_count = [0]
-    
-    def flaky_response(*args: Any, **kwargs: Any) -> str:
-        call_count[0] += 1
-        return "done" if call_count[0] % 2 == 0 else "not_done"
-    
-    mock = MagicMock(side_effect=flaky_response)
-    return mock
-
-
-@pytest.fixture
-def sample_requirement(db_session: Session) -> Any:
-    """Create a Requirement in the test database marked as test data."""
-    from execqueue.models.requirement import Requirement
-
-    requirement = Requirement(
-        id=TEST_ID_START + 1,
-        title=f"{TEST_QUEUE_PREFIX}Sample Requirement",
-        description="This is a test requirement",
-        markdown_content="# Sample Requirement\n\nTest content",
-        verification_prompt=None,
-        status="backlog",
-        is_test=True,
-    )
-    db_session.add(requirement)
-    db_session.commit()
-    db_session.refresh(requirement)
-    return requirement
-
-
-@pytest.fixture
-def sample_work_package(db_session: Session, sample_requirement: Any) -> Any:
-    """Create a WorkPackage linked to a requirement marked as test data."""
-    from execqueue.models.work_package import WorkPackage
-
-    work_package = WorkPackage(
-        id=TEST_ID_START + 10,
-        requirement_id=sample_requirement.id,
-        title=f"{TEST_QUEUE_PREFIX}Sample Work Package",
-        description="This is a test work package",
-        status="backlog",
-        execution_order=1,
-        implementation_prompt="Implement this feature",
-        verification_prompt="Verify the implementation",
-        is_test=True,
-    )
-    db_session.add(work_package)
-    db_session.commit()
-    db_session.refresh(work_package)
-    return work_package
-
-
-@pytest.fixture
-def sample_task(db_session: Session, sample_work_package: Any) -> Any:
-    """Create a Task marked as test data."""
-    from execqueue.models.task import Task
-
+def sample_task(db_session):
+    """Create a sample task for testing."""
     task = Task(
-        id=TEST_ID_START + 20,
-        source_type="work_package",
-        source_id=sample_work_package.id,
+        id=TEST_ID_START + 1,
+        source_type="requirement",
+        source_id=TEST_ID_START + 100,
         title=f"{TEST_QUEUE_PREFIX}Sample Task",
-        prompt="Implement the sample work package",
-        verification_prompt="Verify the implementation",
+        prompt="Sample prompt for testing",
+        verification_prompt="Verify this task",
         status="queued",
         execution_order=1,
         retry_count=0,
@@ -237,30 +66,119 @@ def sample_task(db_session: Session, sample_work_package: Any) -> Any:
 
 
 @pytest.fixture
-def sample_task_queue(db_session: Session, sample_requirement: Any) -> list[Any]:
-    """Create multiple Tasks marked as test data."""
-    from execqueue.models.task import Task
+def sample_requirement(db_session):
+    """Create a sample requirement for testing."""
+    req = Requirement(
+        id=TEST_ID_START + 100,
+        title=f"{TEST_QUEUE_PREFIX}Sample Requirement",
+        description="Sample requirement description",
+        status="pending",
+        is_test=True,
+    )
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+    return req
 
+
+@pytest.fixture
+def sample_work_package(db_session, sample_requirement):
+    """Create a sample work package for testing."""
+    wp = WorkPackage(
+        id=TEST_ID_START + 200,
+        requirement_id=sample_requirement.id,
+        title=f"{TEST_QUEUE_PREFIX}Sample Work Package",
+        description="Sample work package description",
+        execution_order=1,
+        status="pending",
+        is_test=True,
+    )
+    db_session.add(wp)
+    db_session.commit()
+    db_session.refresh(wp)
+    return wp
+
+
+@pytest.fixture
+def sample_task_queue(db_session, sample_requirement):
+    """Create a queue of sample tasks for testing."""
     tasks = []
-    for i, order in enumerate([3, 1, 2]):
+    for i in range(3):
         task = Task(
             id=TEST_ID_START + 30 + i,
             source_type="requirement",
             source_id=sample_requirement.id,
-            title=f"{TEST_QUEUE_PREFIX}Task {i + 1}",
-            prompt=f"Prompt for task {i + 1}",
+            title=f"{TEST_QUEUE_PREFIX}Task {i+1}",
+            prompt=f"Prompt for task {i+1}",
+            execution_order=i + 1,
             status="queued",
-            execution_order=order,
-            retry_count=0,
-            max_retries=5,
             is_test=True,
         )
         db_session.add(task)
         tasks.append(task)
-
+    
     db_session.commit()
-
     for task in tasks:
         db_session.refresh(task)
+    
+    return tasks
 
-    return sorted(tasks, key=lambda t: t.execution_order)
+
+@pytest.fixture
+def dead_letter_entry(db_session, sample_task):
+    """Create a sample dead letter queue entry."""
+    from datetime import datetime, timezone
+    
+    dlq = DeadLetterQueue(
+        task_id=sample_task.id,
+        source_type=sample_task.source_type,
+        source_id=sample_task.source_id,
+        task_title=sample_task.title,
+        task_prompt=sample_task.prompt,
+        verification_prompt=sample_task.verification_prompt,
+        final_status="max_retries_exceeded",
+        failure_reason="Max retries exceeded",
+        failure_details="Task validation failed after 5 retries",
+        last_execution_output=sample_task.last_result,
+        retry_count=5,
+        max_retries=sample_task.max_retries,
+        failed_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(dlq)
+    db_session.commit()
+    db_session.refresh(dlq)
+    return dlq
+
+
+@pytest.fixture
+def locked_task(db_session, sample_task):
+    """Create a locked task for testing."""
+    from datetime import datetime, timezone
+    
+    sample_task.locked_at = datetime.now(timezone.utc)
+    sample_task.locked_by = "test-worker-1"
+    db_session.add(sample_task)
+    db_session.commit()
+    db_session.refresh(sample_task)
+    return sample_task
+
+
+@pytest.fixture
+def mock_worker_state(monkeypatch):
+    """Mock worker state for health check tests."""
+    from execqueue.api import health
+    
+    original_state = health._worker_state.copy()
+    health._worker_state = {
+        "started_at": time.time() - 3600,  # 1 hour ago
+        "instance_id": "test-instance",
+        "last_task_at": "2026-04-23T10:00:00Z",
+        "is_running": True,
+        "tasks_processed": 10,
+        "tasks_failed": 1,
+    }
+    
+    yield
+    
+    health._worker_state = original_state

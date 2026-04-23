@@ -1,0 +1,215 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "adesso": {
+      "name": "adesso-ai-hub",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://adesso-ai-hub.3asabc.de/v1"
+      },
+      "models": {
+        "gpt-oss-120b-sovereign": {
+          "name": "gpt-oss-120b-sovereign",
+          "tool_call": true
+        },
+        "qwen-3.5-122b-sovereign": {
+          "name": "qwen-3.5-122b-sovereign",
+          "tool_call": true
+        }
+      }
+    }
+  },
+  "model": "adesso/qwen-3.5-122b-sovereign",
+  "small_model": "adesso/gpt-oss-120b-sovereign",
+  "mcp": {
+    "filesystem": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/home/ubuntu/workspace/IdeaProjects/ExecQueue"
+      ],
+      "enabled": true
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "enabled": true
+    },
+    "postgres": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://localhost/postgres"
+      ],
+      "enabled": true
+    },
+    "git": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "-y",
+        "@cyanheads/git-mcp-server@latest"
+      ]
+    }
+  },
+  "agent": {
+    "build": {
+      "description": "Haupt-Agent für Code-Entwicklung und Implementierung",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "prompt": "{file:.opencode/prompts/build.md}",
+      "temperature": 0.3,
+      "color": "primary"
+    },
+    "plan": {
+      "description": "Planungs-Agent für Architektur und Design",
+      "model": "adesso/gpt-oss-120b-sovereign",
+      "prompt": "{file:.opencode/prompts/plan.md}",
+      "temperature": 0.1,
+      "color": "secondary",
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "bash": "deny"
+      }
+    },
+    "code-reviewer": {
+      "description": "Reviews code for FastAPI/SQLModel best practices, security, and project conventions",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "prompt": "{file:.opencode/prompts/code-reviewer.md}",
+      "mode": "subagent",
+      "temperature": 0.1,
+      "color": "accent",
+      "permission": {
+        "edit": "deny",
+        "write": "deny"
+      }
+    },
+    "test-engineer": {
+      "description": "Creates and maintains tests with proper coverage",
+      "model": "adesso/gpt-oss-120b-sovereign",
+      "prompt": "{file:.opencode/prompts/test-engineer.md}",
+      "mode": "subagent",
+      "temperature": 0.2,
+      "color": "success"
+    },
+    "db-specialist": {
+      "description": "Handles database schema changes and migrations without Alembic",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "prompt": "{file:.opencode/prompts/db-specialist.md}",
+      "mode": "subagent",
+      "temperature": 0.1,
+      "color": "info"
+    },
+    "documentation-writer": {
+      "description": "Writes and maintains documentation, docstrings, and API docs",
+      "model": "adesso/gpt-oss-120b-sovereign",
+      "prompt": "{file:.opencode/prompts/documentation-writer.md}",
+      "mode": "subagent",
+      "temperature": 0.3,
+      "color": "info"
+    },
+    "security-auditor": {
+      "description": "Security Review und Vulnerability Assessment",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "prompt": "{file:.opencode/prompts/security-auditor.md}",
+      "mode": "subagent",
+      "temperature": 0.1,
+      "color": "error",
+      "permission": {
+        "edit": "deny",
+        "write": "deny"
+      }
+    }
+  },
+    "plan": {
+      "description": "Planungs-Agent für Architektur und Design",
+      "model": "adesso/gpt-oss-120b-sovereign",
+      "prompt": "Erstelle detaillierte Implementierungspläne. Referenziere requirements/*.md und AGENTS.md. Berücksichtige bestehende Patterns im Projekt.",
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false
+      }
+    },
+    "code-reviewer": {
+      "description": "Reviews code for FastAPI/SQLModel best practices, security, and project conventions",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "prompt": "Du bist ein Code-Reviewer für ExecQueue. Prüfe auf: FastAPI Best Practices, SQLModel Patterns, Testing Conventions, und bekannte Gotchas. Fokus auf Security, Performance, Maintainability.",
+      "mode": "subagent",
+      "tools": {
+        "write": false,
+        "edit": false
+      }
+    },
+    "test-engineer": {
+      "description": "Creates and maintains tests with proper coverage",
+      "model": "adesso/gpt-oss-120b-sovereign",
+      "prompt": "Du bist ein Test-Engineering-Experte für ExecQueue. Erstelle Tests mit: EXECQUEUE_TEST_MODE, test_ Prefix, korrekte Fixtures. Stelle sicher alle Tests bestehen.",
+      "mode": "subagent"
+    },
+    "db-specialist": {
+      "description": "Handles database schema changes and migrations without Alembic",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "prompt": "Du bist ein Datenbank-Spezialist für ExecQueue. Handle Schema-Änderungen manuell (keine Alembic). Prüfe updated_at, is_test Filter, Relationships.",
+      "mode": "subagent"
+    },
+    "documentation-writer": {
+      "description": "Writes and maintains documentation, docstrings, and API docs",
+      "model": "adesso/gpt-oss-120b-sovereign",
+      "prompt": "Du bist ein Technical Writer für ExecQueue. Schreibe klare Dokumentation auf Deutsch/Englisch. Docstrings, API Docs, README Updates.",
+      "mode": "subagent"
+    },
+    "security-auditor": {
+      "description": "Security Review und Vulnerability Assessment",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "prompt": "Du bist ein Security-Experte für ExecQueue. Prüfe auf OWASP Top 10, Authentication/Authorization, Input Validation, und Data Exposure.",
+      "mode": "subagent",
+      "tools": {
+        "write": false,
+        "edit": false
+      }
+    }
+  },
+  "permission": {
+    "skill": {
+      "*": "allow",
+      "test-runner": "allow",
+      "db-migration": "allow",
+      "code-review": "allow",
+      "api-generator": "allow"
+    },
+    "edit": "allow",
+    "bash": {
+      "*": "allow",
+      "pytest": "allow",
+      "uvicorn": "allow",
+      "git push": "ask",
+      "git push --force": "deny",
+      "rm -rf": "deny",
+      "drop database": "deny"
+    }
+  },
+  "instructions": [
+    ".opencode/rules/coding-standards.md",
+    "AGENTS.md",
+    "requirements/*.md"
+  ],
+  "watcher": {
+    "ignore": [
+      "node_modules/**",
+      ".git/**",
+      "__pycache__/**",
+      "*.pyc",
+      ".env.local"
+    ]
+  }
+}

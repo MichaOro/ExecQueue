@@ -42,10 +42,12 @@ dist/
 *.egg-info/
 .eggs/
 
-# Project-specific
+# Project-specific configuration
 diff2.config.json
+
+# Sensitive data
 .env
-AGENTS.md
-opencode.json
-/migrations
-/requirements
+.env.local
+.env.*.local
+*.pem
+*.key

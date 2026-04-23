@@ -1,25 +1,8 @@
-from sqlmodel import SQLModel, Session, create_engine
-import os
-from dotenv import load_dotenv
+from sqlmodel import create_engine
+from execqueue.runtime import get_opencode_base_url
 
-# .env laden
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL is not set")
-
-engine = create_engine(
-    DATABASE_URL,
-    echo=True,
+DATABASE_URL = (
+    "postgresql+psycopg://neondb_owner:npg_EoJ1iySBWNX6@ep-wispy-sea-alz3z46t-pooler.c-3.eu-central-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require"
 )
 
-
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
-
-
-def get_session():
-    with Session(engine) as session:
-        yield session
+engine = create_engine(DATABASE_URL, echo=False)
