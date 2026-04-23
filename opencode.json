@@ -130,55 +130,6 @@
       }
     }
   },
-    "plan": {
-      "description": "Planungs-Agent für Architektur und Design",
-      "model": "adesso/gpt-oss-120b-sovereign",
-      "prompt": "Erstelle detaillierte Implementierungspläne. Referenziere requirements/*.md und AGENTS.md. Berücksichtige bestehende Patterns im Projekt.",
-      "tools": {
-        "write": false,
-        "edit": false,
-        "bash": false
-      }
-    },
-    "code-reviewer": {
-      "description": "Reviews code for FastAPI/SQLModel best practices, security, and project conventions",
-      "model": "adesso/qwen-3.5-122b-sovereign",
-      "prompt": "Du bist ein Code-Reviewer für ExecQueue. Prüfe auf: FastAPI Best Practices, SQLModel Patterns, Testing Conventions, und bekannte Gotchas. Fokus auf Security, Performance, Maintainability.",
-      "mode": "subagent",
-      "tools": {
-        "write": false,
-        "edit": false
-      }
-    },
-    "test-engineer": {
-      "description": "Creates and maintains tests with proper coverage",
-      "model": "adesso/gpt-oss-120b-sovereign",
-      "prompt": "Du bist ein Test-Engineering-Experte für ExecQueue. Erstelle Tests mit: EXECQUEUE_TEST_MODE, test_ Prefix, korrekte Fixtures. Stelle sicher alle Tests bestehen.",
-      "mode": "subagent"
-    },
-    "db-specialist": {
-      "description": "Handles database schema changes and migrations without Alembic",
-      "model": "adesso/qwen-3.5-122b-sovereign",
-      "prompt": "Du bist ein Datenbank-Spezialist für ExecQueue. Handle Schema-Änderungen manuell (keine Alembic). Prüfe updated_at, is_test Filter, Relationships.",
-      "mode": "subagent"
-    },
-    "documentation-writer": {
-      "description": "Writes and maintains documentation, docstrings, and API docs",
-      "model": "adesso/gpt-oss-120b-sovereign",
-      "prompt": "Du bist ein Technical Writer für ExecQueue. Schreibe klare Dokumentation auf Deutsch/Englisch. Docstrings, API Docs, README Updates.",
-      "mode": "subagent"
-    },
-    "security-auditor": {
-      "description": "Security Review und Vulnerability Assessment",
-      "model": "adesso/qwen-3.5-122b-sovereign",
-      "prompt": "Du bist ein Security-Experte für ExecQueue. Prüfe auf OWASP Top 10, Authentication/Authorization, Input Validation, und Data Exposure.",
-      "mode": "subagent",
-      "tools": {
-        "write": false,
-        "edit": false
-      }
-    }
-  },
   "permission": {
     "skill": {
       "*": "allow",

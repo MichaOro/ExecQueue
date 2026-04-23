@@ -1,4 +1,5 @@
 import pytest
+from sqlmodel import select
 from execqueue.models.requirement import Requirement
 from execqueue.models.work_package import WorkPackage
 from execqueue.models.task import Task
@@ -8,42 +9,41 @@ class TestQueueAPI:
     """API tests for queue endpoint."""
 
     def test_enqueue_requirement_with_work_packages(self, api_client, db_session):
-        """Test: POST /queue/enqueue-requirement creates tasks for work packages."""
-        from sqlmodel import select
-        from execqueue.models.requirement import Requirement
-        from execqueue.models.work_package import WorkPackage
-
+        """Test: POST /api/queue/enqueue-requirement creates tasks for work packages."""
         req = Requirement(
-            id=9001,
-            title="Test Req",
+            id=None,
+            title="test_Enqueue WP Req",
             description="Desc",
             markdown_content="Content",
             verification_prompt=None,
+            is_test=True,
         )
         db_session.add(req)
         db_session.commit()
         db_session.refresh(req)
 
         wp1 = WorkPackage(
-            id=9010,
+            id=None,
             requirement_id=req.id,
-            title="WP 1",
+            title="test_WP 1",
             description="Desc 1",
             execution_order=1,
+            is_test=True,
         )
         wp2 = WorkPackage(
-            id=9011,
+            id=None,
             requirement_id=req.id,
-            title="WP 2",
+            title="test_WP 2",
             description="Desc 2",
             execution_order=2,
+            is_test=True,
         )
         db_session.add_all([wp1, wp2])
         db_session.commit()
 
         payload = {"requirement_id": req.id}
 
-        response = api_client.post("/queue/enqueue-requirement", json=payload)
+        response = api_client.post("/api/queue/enqueue-requirement", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -67,7 +67,7 @@ class TestQueueAPI:
 
         payload = {"requirement_id": req.id}
 
-        response = api_client.post("/queue/enqueue-requirement", json=payload)
+        response = api_client.post("/api/queue/enqueue-requirement", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -81,10 +81,10 @@ class TestQueueAPI:
         assert task.source_type == "requirement"
 
     def test_enqueue_requirement_not_found(self, api_client):
-        """Test: POST /queue/enqueue-requirement returns 404 for non-existent requirement."""
+        """Test: POST /api/queue/enqueue-requirement returns 404 for non-existent requirement."""
         payload = {"requirement_id": 9999}
 
-        response = api_client.post("/queue/enqueue-requirement", json=payload)
+        response = api_client.post("/api/queue/enqueue-requirement", json=payload)
 
         assert response.status_code == 404
 
@@ -95,16 +95,17 @@ class TestQueueAPI:
             title="Status Test Req",
             description="Desc",
             markdown_content="Content",
+            is_test=True,
         )
         session_with_data.add(req)
         session_with_data.commit()
         session_with_data.refresh(req)
 
-        assert req.status == "backlog"
+        assert req.status == "pending"
 
         payload = {"requirement_id": req.id}
 
-        api_client.post("/queue/enqueue-requirement", json=payload)
+        api_client.post("/api/queue/enqueue-requirement", json=payload)
 
         refreshed_req = session_with_data.get(Requirement, req.id)
         assert refreshed_req.status == "planned"
@@ -123,7 +124,7 @@ class TestQueueAPI:
 
         payload = {"requirement_id": req.id}
 
-        api_client.post("/queue/enqueue-requirement", json=payload)
+        api_client.post("/api/queue/enqueue-requirement", json=payload)
 
         task = session_with_data.exec(
             select(Task).where(Task.source_id == req.id)

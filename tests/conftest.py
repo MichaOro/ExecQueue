@@ -3,16 +3,19 @@ import time
 from pathlib import Path
 from typing import Generator, Any
 from unittest.mock import MagicMock
+from sqlalchemy import text
 
 import pytest
 from dotenv import dotenv_values
 from sqlmodel import SQLModel, Session, create_engine, select
+from fastapi.testclient import TestClient
 
 from execqueue.models.task import Task
 from execqueue.models.requirement import Requirement
 from execqueue.models.work_package import WorkPackage
 from execqueue.models.dead_letter import DeadLetterQueue
 from execqueue.db.engine import engine
+from execqueue.main import app
 
 DOTENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 DOTENV_VALUES = dotenv_values(DOTENV_PATH) if DOTENV_PATH.exists() else {}
@@ -26,6 +29,33 @@ TEST_DATABASE_URL = (
 
 TEST_QUEUE_PREFIX = os.getenv("TEST_QUEUE_PREFIX", "test_")
 TEST_ID_START = 9000
+
+
+@pytest.fixture
+def client():
+    """Create a test client for API tests.
+    
+    Overrides the get_session dependency to use the test database session.
+    """
+    from execqueue.db.session import get_session
+    
+    # Save existing overrides
+    existing_overrides = app.dependency_overrides.copy()
+    
+    def override_get_session():
+        """Override get_session for testing with a new session each time."""
+        with Session(engine) as session:
+            yield session
+    
+    # Set the override
+    app.dependency_overrides[get_session] = override_get_session
+    
+    with TestClient(app, raise_server_exceptions=True) as test_client:
+        yield test_client
+    
+    # Restore previous overrides
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(existing_overrides)
 
 
 @pytest.fixture(autouse=True)
@@ -45,11 +75,28 @@ def db_session():
 
 @pytest.fixture
 def sample_task(db_session):
-    """Create a sample task for testing."""
+    """Create a sample task for testing.
+    
+    Uses dynamic ID allocation to avoid conflicts with existing test data.
+    """
+    # Get the next available ID by finding the max existing test ID
+    from sqlalchemy import func
+    max_id_result = db_session.exec(
+        text("SELECT COALESCE(MAX(id), 8999) FROM tasks WHERE id >= 9000")
+    ).one()
+    # Handle different return types from SQLModel/SQLAlchemy
+    if hasattr(max_id_result, '__getitem__'):
+        max_id = max_id_result[0]
+    elif hasattr(max_id_result, '_mapping'):
+        max_id = list(max_id_result.values())[0]
+    else:
+        max_id = max_id_result
+    next_id = int(max_id) + 1
+    
     task = Task(
-        id=TEST_ID_START + 1,
+        id=next_id,
         source_type="requirement",
-        source_id=TEST_ID_START + 100,
+        source_id=next_id + 100,
         title=f"{TEST_QUEUE_PREFIX}Sample Task",
         prompt="Sample prompt for testing",
         verification_prompt="Verify this task",

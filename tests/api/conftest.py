@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from execqueue.main import app
-from execqueue.db.engine import get_session
+from execqueue.db.session import get_session
 
 
 @pytest.fixture(scope="session")
@@ -14,16 +14,27 @@ def client() -> TestClient:
 
 @pytest.fixture
 def api_client(db_session: Session):
-    """TestClient with custom session dependency overridden."""
+    """TestClient with custom session dependency overridden.
+    
+    Uses the same pattern as tests/conftest.py client fixture.
+    """
+    # Save existing overrides
+    existing_overrides = app.dependency_overrides.copy()
+    
     def override_get_session():
-        yield db_session
-
+        """Override get_session for testing with a new session each time."""
+        with Session(db_session.bind) as session:
+            yield session
+    
+    # Set the override
     app.dependency_overrides[get_session] = override_get_session
 
     with TestClient(app, raise_server_exceptions=True) as client:
         yield client
 
+    # Restore previous overrides
     app.dependency_overrides.clear()
+    app.dependency_overrides.update(existing_overrides)
 
 
 
@@ -36,35 +47,38 @@ def session_with_data(db_session: Session):
     from execqueue.models.task import Task
 
     req = Requirement(
-        id=9001,
-        title="Test Requirement",
+        id=None,
+        title="test_Test Requirement",
         description="Test desc",
         markdown_content="Test content",
         verification_prompt=None,
+        is_test=True,
     )
     db_session.add(req)
     db_session.commit()
     db_session.refresh(req)
 
     wp = WorkPackage(
-        id=9010,
+        id=None,
         requirement_id=req.id,
-        title="Test WP",
+        title="test_Test WP",
         description="Test WP desc",
         execution_order=1,
+        is_test=True,
     )
     db_session.add(wp)
     db_session.commit()
     db_session.refresh(wp)
 
     task = Task(
-        id=9020,
+        id=None,
         source_type="work_package",
         source_id=wp.id,
-        title="Test Task",
+        title="test_Test Task",
         prompt="Test prompt",
         execution_order=1,
         status="backlog",
+        is_test=True,
     )
     db_session.add(task)
     db_session.commit()

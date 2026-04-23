@@ -1,7 +1,7 @@
 import pytest
 import json
 from unittest.mock import patch, MagicMock
-from httpx import TimeoutException, ConnectError, HTTPError
+from httpx import TimeoutException, ConnectError, HTTPError, MockTransport
 
 from execqueue.workers.opencode_adapter import (
     execute_with_opencode,
@@ -312,36 +312,108 @@ class TestExecuteWithOpencode:
             assert result.raw_output == "Alternative output field"
 
 
-class TestStubBackwardCompatibility:
-    """Tests for backward compatibility with stub behavior."""
-
-    def test_stub_execution_returns_result(self, monkeypatch):
-        """Test: Stub execution returns OpenCodeExecutionResult."""
+class TestOpenCodeContract:
+    """Contract tests for OpenCode API response structure.
+    
+    These tests verify that the OpenCode adapter always returns properly
+    structured responses, regardless of the actual execution result.
+    """
+    
+    def test_contract_execution_returns_result(self, monkeypatch):
+        """Test: Execution returns properly structured OpenCodeExecutionResult."""
         monkeypatch.setenv("OPENCODE_BASE_URL", "http://test.local")
-        result = execute_with_opencode(prompt="test prompt")
+        
+        def mock_handler(request):
+            from httpx import Response
+            return Response(
+                status_code=200,
+                json={
+                    "status": "completed",
+                    "output": "Mocked execution result",
+                    "summary": "Mocked summary",
+                },
+            )
+        
+        transport = MockTransport(mock_handler)
+        
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = lambda self: mock_client
+            mock_client.__exit__ = lambda self, *args: None
+            mock_client.post.return_value.status_code = 200
+            mock_client.post.return_value.json.return_value = {
+                "status": "completed",
+                "output": "Mocked execution result",
+                "summary": "Mocked summary",
+            }
+            mock_client_class.return_value = mock_client
+            
+            result = execute_with_opencode(prompt="test prompt")
 
         assert isinstance(result, OpenCodeExecutionResult)
         assert result.status in ["completed", "failed", "error"]
         assert result.raw_output is not None
         assert result.summary is not None
 
-    def test_stub_contract_status_field(self, monkeypatch):
-        """Test: Result always has status field."""
+    def test_contract_status_field(self, monkeypatch):
+        """Test: Result always has status field with valid value."""
         monkeypatch.setenv("OPENCODE_BASE_URL", "http://test.local")
-        result = execute_with_opencode(prompt="test")
+        
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = lambda self: mock_client
+            mock_client.__exit__ = lambda self, *args: None
+            mock_client.post.return_value.status_code = 200
+            mock_client.post.return_value.json.return_value = {
+                "status": "completed",
+                "output": "Output",
+                "summary": "Summary",
+            }
+            mock_client_class.return_value = mock_client
+            
+            result = execute_with_opencode(prompt="test")
+        
         assert result.status in ["completed", "failed", "error"]
 
-    def test_stub_contract_raw_output_field(self, monkeypatch):
-        """Test: Result always has raw_output field."""
+    def test_contract_raw_output_field(self, monkeypatch):
+        """Test: Result always has non-empty raw_output field."""
         monkeypatch.setenv("OPENCODE_BASE_URL", "http://test.local")
-        result = execute_with_opencode(prompt="test")
+        
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = lambda self: mock_client
+            mock_client.__exit__ = lambda self, *args: None
+            mock_client.post.return_value.status_code = 200
+            mock_client.post.return_value.json.return_value = {
+                "status": "completed",
+                "output": "Test output",
+                "summary": "Summary",
+            }
+            mock_client_class.return_value = mock_client
+            
+            result = execute_with_opencode(prompt="test")
+        
         assert result.raw_output is not None
         assert isinstance(result.raw_output, str)
         assert len(result.raw_output) > 0
 
-    def test_stub_contract_summary_field(self, monkeypatch):
-        """Test: Result has optional summary field."""
+    def test_contract_summary_field(self, monkeypatch):
+        """Test: Result has summary field."""
         monkeypatch.setenv("OPENCODE_BASE_URL", "http://test.local")
-        result = execute_with_opencode(prompt="test")
+        
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = lambda self: mock_client
+            mock_client.__exit__ = lambda self, *args: None
+            mock_client.post.return_value.status_code = 200
+            mock_client.post.return_value.json.return_value = {
+                "status": "completed",
+                "output": "Output",
+                "summary": "Test summary",
+            }
+            mock_client_class.return_value = mock_client
+            
+            result = execute_with_opencode(prompt="test")
+        
         assert result.summary is not None
         assert isinstance(result.summary, str)

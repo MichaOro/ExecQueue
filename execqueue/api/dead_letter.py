@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 from datetime import datetime, timezone
+from sqlalchemy import func
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -181,7 +182,7 @@ def bulk_requeue_dead_letter_entries(
     
     Creates new tasks with reset retry count for all specified entries.
     """
-    new_task_ids = []
+    new_tasks = []
     
     for dlq_id in request.task_ids:
         entry = session.get(DeadLetterQueue, dlq_id)
@@ -202,9 +203,12 @@ def bulk_requeue_dead_letter_entries(
         )
         
         session.add(new_task)
-        new_task_ids.append(new_task.id)
+        new_tasks.append(new_task)
     
     session.commit()
+    
+    # Get IDs after commit
+    new_task_ids = [task.id for task in new_tasks if task.id is not None]
     
     return RequeueResponse(
         requeued_count=len(new_task_ids),
