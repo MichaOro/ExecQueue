@@ -7,14 +7,16 @@ name = "execqueue"
 version = "0.1.0"
 description = "ExecQueue - Execution Queue System"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "fastapi>=0.109",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "fastapi>=0.109",
     "httpx>=0.26",
+    "uvicorn>=0.27",
 ]
 
 [tool.pytest.ini_options]
