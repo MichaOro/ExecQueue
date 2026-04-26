@@ -3,7 +3,9 @@
 import os
 from enum import Enum
 from functools import lru_cache
-from pydantic import AliasChoices, Field, model_validator
+from urllib.parse import urlsplit
+
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +15,19 @@ class RuntimeEnvironment(str, Enum):
     DEVELOPMENT = "development"
     TEST = "test"
     PRODUCTION = "production"
+
+
+def validate_database_driver(database_url: str | None, field_name: str) -> str | None:
+    """Require explicit SQLAlchemy driver names for PostgreSQL URLs."""
+    if database_url is None:
+        return None
+
+    scheme = urlsplit(database_url).scheme
+    if scheme == "postgresql":
+        raise ValueError(
+            f"{field_name} must use 'postgresql+psycopg://' instead of 'postgresql://'."
+        )
+    return database_url
 
 
 class Settings(BaseSettings):
@@ -83,11 +98,7 @@ class Settings(BaseSettings):
     )
     telegram_notification_user_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "TELEGRAM_NOTIFICATION_USER_ID",
-            "TELEGRAM_NOTIFICATION_STARTUP_USER_ID",
-        ),
-        description="User ID for notification events like bot online (optional). Use your Telegram user ID.",
+        description="User ID for notification events (DEPRECATED: Use DB subscriptions instead).",
     )
     execqueue_api_host: str = Field(
         default="127.0.0.1",
@@ -103,6 +114,12 @@ class Settings(BaseSettings):
         default="execqueue.main:app",
         description="ASGI application import path used by the local API orchestrator.",
     )
+
+    @field_validator("database_url", "database_url_test")
+    @classmethod
+    def validate_postgres_driver(cls, value: str | None, info) -> str | None:
+        """Reject implicit PostgreSQL driver selection to keep runtime and Alembic aligned."""
+        return validate_database_driver(value, info.field_name.upper())
 
     @property
     def is_test_environment(self) -> bool:
@@ -133,16 +150,6 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "DATABASE_URL and DATABASE_URL_TEST must not point to the same database."
                 )
-
-        if (
-            self.telegram_notification_user_id is None
-            and "TELEGRAM_NOTIFICATION_STARTUP_USER_ID" not in os.environ
-            and "TELEGRAM_NOTIFICATION_USER_ID" not in os.environ
-        ):
-            for key, value in os.environ.items():
-                if key.upper() == "TELEGRAM_NOTIFICATION_STARTUP_USER_ID":
-                    self.telegram_notification_user_id = value
-                    break
 
         return self
 

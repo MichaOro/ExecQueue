@@ -99,23 +99,30 @@ class TestSettingsFromEnvironment:
         """Test that database_url is loaded from environment."""
         with patch.dict(
             os.environ,
-            {"DATABASE_URL": "postgresql://user:secret@localhost:5432/execqueue"},
+            {"DATABASE_URL": "postgresql+psycopg://user:secret@localhost:5432/execqueue"},
             clear=False,
         ):
             settings = Settings()
-            assert settings.database_url == "postgresql://user:secret@localhost:5432/execqueue"
+            assert (
+                settings.database_url
+                == "postgresql+psycopg://user:secret@localhost:5432/execqueue"
+            )
 
     def test_database_url_test_from_env(self):
         """Test that database_url_test is loaded from environment."""
         with patch.dict(
             os.environ,
-            {"DATABASE_URL_TEST": "postgresql://user:secret@localhost:5432/execqueue_test"},
+            {
+                "DATABASE_URL_TEST": (
+                    "postgresql+psycopg://user:secret@localhost:5432/execqueue_test"
+                )
+            },
             clear=False,
         ):
             settings = Settings()
             assert (
                 settings.database_url_test
-                == "postgresql://user:secret@localhost:5432/execqueue_test"
+                == "postgresql+psycopg://user:secret@localhost:5432/execqueue_test"
             )
 
     def test_get_settings_uses_database_url_test_when_app_env_is_test(self):
@@ -125,8 +132,10 @@ class TestSettingsFromEnvironment:
             os.environ,
             {
                 "APP_ENV": "test",
-                "DATABASE_URL": "postgresql://user:secret@localhost:5432/execqueue",
-                "DATABASE_URL_TEST": "postgresql://user:secret@localhost:5432/execqueue_test",
+                "DATABASE_URL": "postgresql+psycopg://user:secret@localhost:5432/execqueue",
+                "DATABASE_URL_TEST": (
+                    "postgresql+psycopg://user:secret@localhost:5432/execqueue_test"
+                ),
             },
             clear=False,
         ):
@@ -134,8 +143,13 @@ class TestSettingsFromEnvironment:
             assert settings.app_env is RuntimeEnvironment.TEST
             assert (
                 settings.active_database_url
-                == "postgresql://user:secret@localhost:5432/execqueue_test"
+                == "postgresql+psycopg://user:secret@localhost:5432/execqueue_test"
             )
+
+    def test_database_url_requires_explicit_psycopg_driver(self):
+        """Test that PostgreSQL URLs must declare the psycopg driver explicitly."""
+        with pytest.raises(ValueError, match="postgresql\\+psycopg://"):
+            Settings(database_url="postgresql://user:secret@localhost:5432/execqueue")
 
     def test_telegram_bot_token_from_env(self):
         """Test that telegram_bot_token is loaded from environment."""
@@ -170,17 +184,6 @@ class TestSettingsFromEnvironment:
             settings = get_settings()
             assert settings.telegram_admin_user_id == "123456789"
 
-    def test_telegram_notification_user_id_supports_legacy_startup_env_name(self):
-        """Test that the legacy startup notification env name is still accepted."""
-        get_settings.cache_clear()
-        with patch.dict(
-            os.environ,
-            {"TELEGRAM_NOTIFICATION_STARTUP_USER_ID": "123456789"},
-            clear=False,
-        ):
-            settings = get_settings()
-            assert settings.telegram_notification_user_id == "123456789"
-
     def test_execqueue_api_host_from_env(self):
         """Test that execqueue_api_host is loaded from environment."""
         with patch.dict(os.environ, {"EXECQUEUE_API_HOST": "0.0.0.0"}):
@@ -201,20 +204,23 @@ class TestSettingsValidation:
         """Test that non-test runtime uses DATABASE_URL."""
         settings = Settings(
             app_env=RuntimeEnvironment.DEVELOPMENT,
-            database_url="postgresql://user:secret@localhost:5432/execqueue",
+            database_url="postgresql+psycopg://user:secret@localhost:5432/execqueue",
         )
-        assert settings.active_database_url == "postgresql://user:secret@localhost:5432/execqueue"
+        assert (
+            settings.active_database_url
+            == "postgresql+psycopg://user:secret@localhost:5432/execqueue"
+        )
 
     def test_active_database_url_uses_test_database_in_test_env(self):
         """Test that test runtime uses DATABASE_URL_TEST."""
         settings = Settings(
             app_env=RuntimeEnvironment.TEST,
-            database_url="postgresql://user:secret@localhost:5432/execqueue",
-            database_url_test="postgresql://user:secret@localhost:5432/execqueue_test",
+            database_url="postgresql+psycopg://user:secret@localhost:5432/execqueue",
+            database_url_test="postgresql+psycopg://user:secret@localhost:5432/execqueue_test",
         )
         assert (
             settings.active_database_url
-            == "postgresql://user:secret@localhost:5432/execqueue_test"
+            == "postgresql+psycopg://user:secret@localhost:5432/execqueue_test"
         )
 
     def test_active_database_url_requires_primary_database(self):
@@ -234,7 +240,7 @@ class TestSettingsValidation:
 
         settings = TestSettings(
             app_env=RuntimeEnvironment.TEST,
-            database_url="postgresql://user:secret@localhost:5432/execqueue",
+            database_url="postgresql+psycopg://user:secret@localhost:5432/execqueue",
         )
 
         with pytest.raises(ValueError, match="DATABASE_URL_TEST must be set"):
@@ -245,8 +251,8 @@ class TestSettingsValidation:
         with pytest.raises(ValueError, match="must not point to the same database"):
             Settings(
                 app_env=RuntimeEnvironment.TEST,
-                database_url="postgresql://user:secret@localhost:5432/execqueue",
-                database_url_test="postgresql://user:secret@localhost:5432/execqueue",
+                database_url="postgresql+psycopg://user:secret@localhost:5432/execqueue",
+                database_url_test="postgresql+psycopg://user:secret@localhost:5432/execqueue",
             )
 
     def test_telegram_polling_timeout_minimum(self):

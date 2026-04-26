@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from execqueue.workers.telegram.commands import (
     get_health_command_message,
-    get_restart_command_message,
 )
 
 
@@ -27,24 +26,6 @@ class TestHealthCommandMock:
         assert "health" in message.lower()
 
 
-class TestRestartCommandMock:
-    """Mock-based tests for restart command (before real implementation)."""
-
-    def test_restart_message_indicates_planned_status(self):
-        """Test that restart message indicates feature is planned/not ready."""
-        message = get_restart_command_message()
-
-        assert "planned" in message.lower() or "coming" in message.lower() or "not yet" in message.lower()
-
-    def test_restart_message_structure(self):
-        """Test that restart message has expected structure."""
-        message = get_restart_command_message()
-
-        assert isinstance(message, str)
-        assert len(message) > 0
-        assert "restart" in message.lower()
-
-
 class TestHealthCheckPlaceholder:
     """Tests to ensure health output remains readable and status-oriented."""
 
@@ -56,15 +37,6 @@ class TestHealthCheckPlaceholder:
         has_status_word = any(word in message.lower() for word in ["status", "check", "health", "overall"])
 
         assert has_emoji or has_status_word, "Health message should have status indicator"
-
-    def test_restart_message_contains_action_indicator(self):
-        """Test that restart message includes an action indicator."""
-        message = get_restart_command_message()
-
-        has_emoji = any(c in message for c in ["??", "??", "??", "?"])
-        has_action_word = any(word in message.lower() for word in ["restart", "restarting", "planned", "coming"])
-
-        assert has_emoji or has_action_word, "Restart message should have action indicator"
 
 
 class TestHealthCheckFutureImplementation:

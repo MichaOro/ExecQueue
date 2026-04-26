@@ -112,12 +112,14 @@ and tests.
 
 ```bash
 APP_ENV=development
-DATABASE_URL=postgresql://execqueue:change-me@localhost:5432/execqueue
-DATABASE_URL_TEST=postgresql://execqueue_test:change-me@localhost:5432/execqueue_test
+DATABASE_URL=postgresql+psycopg://execqueue:change-me@localhost:5432/execqueue
+DATABASE_URL_TEST=postgresql+psycopg://execqueue_test:change-me@localhost:5432/execqueue_test
 ```
 
 The runtime never falls back from `DATABASE_URL_TEST` to `DATABASE_URL`. Tests
 must use the dedicated test database URL exclusively.
+PostgreSQL URLs must declare the driver explicitly with `postgresql+psycopg://`
+so runtime, health checks, and Alembic all consume the same value unchanged.
 
 ### Database Runtime Base
 

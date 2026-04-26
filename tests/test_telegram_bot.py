@@ -77,11 +77,11 @@ class TestTelegramBotModule:
 
         assert callable(health_command)
 
-    def test_restart_command_handler_exists(self):
-        """restart_command handler should be defined."""
-        from execqueue.workers.telegram.bot import restart_command
+    def test_help_command_handler_exists(self):
+        """help_command handler should be defined."""
+        from execqueue.workers.telegram.bot import help_command
 
-        assert callable(restart_command)
+        assert callable(help_command)
 
 
 class TestBotWithMockedTelegram:

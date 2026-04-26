@@ -1,123 +1,194 @@
-# Implementation Test Strategy
+# Implementierungs-Teststrategie
 
 ## TL;DR
-Tests are classified along two dimensions:
-1. **System Criticality** (impact on system stability)
-2. **Business Logic Coverage** (importance for correct behavior)
+Tests werden entlang von zwei Dimensionen klassifiziert:
 
-A combined score determines prioritization: **Critical, High, Medium, Low**
+1. **Systemkritikalität** – Einfluss auf die Systemstabilität
+2. **Business-Logik-Abdeckung** – Bedeutung für korrektes Verhalten
 
----
+Ein kombinierter Score bestimmt die Priorität: **Kritisch, Hoch, Mittel, Niedrig**
 
-## 1. Objectives
+Für jede Implementierung muss in der Validierungsphase entschieden werden, ob **Unit-Tests und/oder Integrationstests erstellt oder aktualisiert werden müssen**.
 
-- Ensure **functional correctness**
-- Ensure **system stability**
-- Minimize **test gaps (delta)**
-- Balance **speed vs. quality**
-- Enable **LLM + human collaboration**
+Ziel: **Sinnvolle, breite Testabdeckung ohne unnötige Aufblähung der Test-Suite**
 
 ---
 
-## 2. Test Types
+## 1. Ziele
 
-### Unit Tests
-- Isolated logic validation
-- Use mocks/stubs
-- Fast, deterministic
-- Example:
-  - DB connection function (mocked)
-
-### Integration Tests
-- Real component interaction
-- No mocks for critical paths
-- Validate infrastructure & config
-- Example:
-  - Real DB connection
-  - Telegram API interaction
+- Sicherstellung der **funktionalen Korrektheit**
+- Sicherstellung der **Systemstabilität**
+- Minimierung von **Testlücken (Delta)**
+- Balance zwischen **Geschwindigkeit und Qualität**
+- Unterstützung von **LLM + Mensch Zusammenarbeit**
+- **Sinnvolle und breite Abdeckung** ohne redundante Tests
+- Möglichst kleine, aber ausreichende Testoberfläche
 
 ---
 
-## 3. Scoring Model
+## 2. Testarten
 
-Use a simple additive 1–3 scoring model across two dimensions:
+### Unit-Tests
 
-### 1. System Criticality
+- Testen isolierte Logik
+- Verwenden Mocks/Stubs, wo sinnvoll
+- Schnell, deterministisch, eng abgegrenzt
+- Geeignet für:
+    - Business-Regeln
+    - Parsing
+    - Mapping
+    - Validierung
+    - Scoring
+    - Formatierung
+    - Entscheidungslogik
 
-Defines how critical a component or feature is for the overall system stability.
-
-| Score | Description                          |
-|------:|--------------------------------------|
-| 1     | Core system dependency (DB, API)     |
-| 2     | Important feature                    |
-| 3     | Nice-to-have / edge case             |
-
----
-
-### 2. Business Logic Coverage
-
-Defines how important it is to explicitly validate this behavior via tests.
-
-| Score | Description                          |
-|------:|--------------------------------------|
-| 1     | Must be explicitly tested            |
-| 2     | Should be tested                     |
-| 3     | Implicitly covered / redundant       |
+**Beispiel:**
+- Validierung einer DB-Konfiguration mit gemockten Umgebungswerten
 
 ---
 
-### 4. Priority Calculation
+### Integrationstests
 
+- Testen das Zusammenspiel echter Komponenten
+- Möglichst **keine Mocks auf kritischen Pfaden**
+- Validieren:
+    - Infrastruktur
+    - Wiring
+    - Konfiguration
+    - Laufzeitverhalten
+    - externe Schnittstellen
+    - Persistenz
+
+**Beispiele:**
+- Echte DB-Verbindung gegen Testdatenbank
+- FastAPI-Endpoint mit Test-Client
+- Telegram-Command über internen Dispatcher (ohne echte API, sofern nicht nötig)
+
+---
+
+## 3. Regeln für Test-Erstellung / -Update
+
+Für jede Implementierung prüfen:
+
+- Neue Tests erstellen, wenn Verhalten noch nicht abgedeckt ist
+- Bestehende Tests anpassen, wenn sich Verhalten geändert hat
+- **Keine neuen Tests**, wenn bereits ausreichend abgedeckt
+- Bestehende Tests **erweitern statt duplizieren**
+- Testoberfläche klein halten, aber ohne relevante Lücken
+
+Wenn kein Test nötig ist → **Begründung dokumentieren**
+
+---
+
+## Zielzustand
+
+- Gute Unit-Test-Abdeckung für isolierte Logik
+- Gute Integrationstest-Abdeckung für kritische Flows
+- Keine künstliche Testaufblähung
+- Keine redundanten Tests
+- Klare Nachvollziehbarkeit zwischen Requirement, Code und Tests
+
+---
+
+## 4. Bewertungsmodell (Scoring)
+
+### 4.1 Systemkritikalität
+
+| Score | Bedeutung |
+|------:|----------|
+| 1     | Kernsystem (DB, API) |
+| 2     | Wichtiges Feature |
+| 3     | Nice-to-have / Edge Case |
+
+---
+
+### 4.2 Business-Logik-Abdeckung
+
+| Score | Bedeutung |
+|------:|----------|
+| 1     | Muss explizit getestet werden |
+| 2     | Sollte getestet werden |
+| 3     | Implizit abgedeckt / redundant |
+
+---
+
+## 5. Prioritätsberechnung
+
+```text
+Priorität = Kritikalität + Abdeckung
 ```
-Priority Score = Criticality + Coverage
-```
-### Priority Mapping
 
-| Score | Priority  |
-|-------|----------|
-| 2     | Critical |
-| 3     | High     |
-| 4     | Medium   |
-| 5–6   | Low      |
+### Mapping
 
----
-
-## 5. Examples
-
-### Database Connection
-
-- Criticality: **1**
-- Coverage: **1**
-
-→ Score = 2.0 → **Critical**
+| Score | Priorität |
+|------:|-----------|
+| 2     | Kritisch |
+| 3     | Hoch |
+| 4     | Mittel |
+| 5–6   | Niedrig |
 
 ---
 
-### `/health` Command Exists
+## 6. Struktur der Test-Planungstabelle
 
-- Criticality: **2**
-- Coverage: **3**
-
-→ Score = 5 → **Low**
-
-Reasoning:
-The explicit existence test has low standalone value because the `/health` result validation test implicitly verifies that the command exists and can be executed.
-
-### `/health` Command Result Validation
-
-- Criticality: **2**
-- Coverage: **1**
-
-→ Score = 3 → **High**
-
-Reasoning:
-The `/health` result validation verifies that the command is executable and returns the expected health information. It provides direct assurance for operational readiness and implicitly covers command existence.
+| Test-Datei | Testname | Priorität | Typ | Erfolgskriterien | Fehlerkriterien | Begründung |
+|---|---|---:|---|---|---|---|
+| `tests/integration/test_health.py` | `test_health_returns_system_status` | Hoch | Integration | Endpoint liefert korrekte Health-Daten | Endpoint fehlt / falsche Daten / Fehler | Validiert Betriebsbereitschaft |
 
 ---
 
-## 6. Folder Structure
+### Spaltenbeschreibung
 
-```
+| Spalte | Zweck |
+|---|---|
+| `Test-Datei` | Pfad zur Testdatei |
+| `Testname` | Konkreter Testname |
+| `Priorität` | Kritisch / Hoch / Mittel / Niedrig |
+| `Typ` | Unit oder Integration |
+| `Erfolgskriterien` | Wann der Test besteht |
+| `Fehlerkriterien` | Welche Fehler erkannt werden |
+| `Begründung` | Warum dieser Test existiert |
+
+---
+
+## 7. Beispiele
+
+### DB-Verbindung
+
+- Kritikalität: 1
+- Abdeckung: 1  
+  → Score = 2 → **Kritisch**
+
+Begründung:  
+Core-Komponente → echter Integrationstest erforderlich
+
+---
+
+### /health Command Existenz
+
+- Kritikalität: 2
+- Abdeckung: 3  
+  → Score = 5 → **Niedrig**
+
+Begründung:  
+Implizit durch Ergebnis-Test abgedeckt
+
+---
+
+### /health Ergebnisvalidierung
+
+- Kritikalität: 2
+- Abdeckung: 1  
+  → Score = 3 → **Hoch**
+
+Begründung:  
+Validiert Funktionsfähigkeit + Systemstatus
+
+---
+
+## 8. Ordnerstruktur
+
+```text
 /tests
   /unit
   /integration
@@ -126,16 +197,16 @@ The `/health` result validation verifies that the command is executable and retu
 
 ---
 
-## 7. Test Clustering
+## 9. Test-Clustering
 
-Tests must be grouped into clusters:
+Cluster:
 
-- `critical`
-- `high`
-- `medium`
-- `low`
+- critical (kritisch)
+- high (hoch)
+- medium (mittel)
+- low (niedrig)
 
-Each test MUST include metadata:
+Beispiel:
 
 ```yaml
 priority: critical
@@ -145,63 +216,84 @@ requirement: telegram_start
 
 ---
 
-## 8. Requirement-Based Documentation
+## 10. Requirement-basierte Dokumentation
 
-For each feature / requirement:
+Pfad:
 
-- Create or update a document:
-
-```
+```text
 /docs/tests/<requirement>.md
 ```
 
-### Content:
+### Inhalt:
 
-- List of all related tests
-- Classification (unit/integration)
-- Priority cluster
-- Coverage explanation
-
----
-
-## 9. LLM Workflow Integration
-
-### Implementation Phase
-- Minimal prompt
-- Focus on feature delivery
-
-### Validation Phase
-- Inject Test Strategy
-- Enforce:
-  - Test creation/update
-  - Correct classification
-  - Documentation update
+- Implementierungsbereich
+- Zugehörige Tests
+- Klassifikation (Unit/Integration)
+- Priorität
+- Erfolgskriterien
+- Fehlerkriterien
+- Coverage-Erklärung
+- Entscheidung:
+    - neuer Test
+    - Update
+    - kein Test
+- Begründung gegen Redundanz
 
 ---
 
-## 10. Guardrails
+## 11. LLM-Workflow Integration
 
-- No integration test → FAIL for critical paths
-- Mock-only DB tests → NOT sufficient
-- Redundant tests → allowed if low maintenance
-- Every requirement → must map to tests
+### Implementierungsphase
+
+- Minimaler Prompt
+- Fokus auf Feature
+- Keine spekulativen Tests
+
+### Validierungsphase
+
+- Unit-Tests für neue/geänderte Logik
+- Integrationstests für:
+    - Komponenteninteraktion
+    - Infrastruktur
+    - APIs / DB / Runtime
+- Bestehende Tests anpassen statt duplizieren
+- Dokumentation aktualisieren
+- Testübersicht pflegen
 
 ---
 
-## 11. Best Practices
+## 12. Guardrails
 
-- Prefer **clarity over quantity**
-- Allow **controlled redundancy**
-- Always include **at least one real integration test** for critical components
-- Keep tests **deterministic**
-- Avoid **over-mocking critical infrastructure**
+- Kein Integrationstest bei kritischen Pfaden → FAIL
+- Nur Mock-DB-Tests → nicht ausreichend
+- Redundante Tests → nur mit Begründung
+- Jedes Requirement → Test oder dokumentierte Abdeckung
+- Neue Logik ohne Testentscheidung → FAIL
+- Testabdeckung breit genug, aber nicht künstlich aufgebläht
 
 ---
 
-## 12. Summary
+## 13. Best Practices
 
-This strategy ensures:
-- Scalable test architecture
-- Consistent quality across LLM + human work
-- Controlled growth of test suites
-- Clear prioritization based on real system risk
+- Klarheit vor Quantität
+- Kontrollierte Redundanz nur bei Mehrwert
+- Mindestens ein echter Integrationstest für kritische Komponenten
+- Deterministische Tests
+- Kein Over-Mocking bei Infrastruktur
+- Bestehende Tests bevorzugt erweitern
+- Kleine, fokussierte Testoberfläche
+- Keine Tests auf instabile Implementierungsdetails
+- Unit = Logik, Integration = Verhalten
+
+---
+
+## 14. Zusammenfassung
+
+Diese Strategie ermöglicht:
+
+- Skalierbare Testarchitektur
+- Konsistente Qualität bei Mensch + LLM
+- Kontrolliertes Wachstum der Test-Suite
+- Klare Priorisierung nach Risiko
+- Sinnvolle und breite Testabdeckung
+- Minimale Redundanz und Wartungskosten

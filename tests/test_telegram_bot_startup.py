@@ -84,23 +84,26 @@ class TestRunBot:
                     mock_app.updater.start_polling = AsyncMock()
                     mock_create_app.return_value = mock_app
 
-                    with patch("asyncio.Event") as mock_event_class:
-                        mock_event = AsyncMock()
-                        mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
-                        mock_event_class.return_value = mock_event
+                    with patch("execqueue.workers.telegram.bot.send_startup_notification") as mock_send_startup:
+                        with patch("asyncio.Event") as mock_event_class:
+                            mock_event = AsyncMock()
+                            mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
+                            mock_event_class.return_value = mock_event
 
-                        with patch("asyncio.get_running_loop") as mock_loop:
-                            mock_loop_instance = MagicMock()
-                            mock_loop.return_value = mock_loop_instance
-                            mock_loop_instance.add_signal_handler = MagicMock()
+                            with patch("asyncio.get_running_loop") as mock_loop:
+                                mock_loop_instance = MagicMock()
+                                mock_loop.return_value = mock_loop_instance
+                                mock_loop_instance.add_signal_handler = MagicMock()
 
-                            # Should start without error (will raise CancelledError from asyncio.Event)
-                            with pytest.raises(asyncio.CancelledError):
-                                await run_bot()
+                                # Should start without error (will raise CancelledError from asyncio.Event)
+                                with pytest.raises(asyncio.CancelledError):
+                                    await run_bot()
 
-                            mock_app.initialize.assert_called_once()
-                            mock_app.start.assert_called_once()
-                            mock_app.updater.start_polling.assert_called_once()
+                                mock_app.initialize.assert_called_once()
+                                mock_app.start.assert_called_once()
+                                mock_app.updater.start_polling.assert_called_once()
+                                # Verify new startup notification function is called
+                                mock_send_startup.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_bot_sends_startup_notification(self):
@@ -126,7 +129,7 @@ class TestRunBot:
                     mock_app.updater.start_polling = AsyncMock()
                     mock_create_app.return_value = mock_app
 
-                    with patch("execqueue.workers.telegram.bot.send_notification_to_user") as mock_send:
+                    with patch("execqueue.workers.telegram.bot.send_startup_notification") as mock_send_startup:
                         with patch("asyncio.Event") as mock_event_class:
                             mock_event = AsyncMock()
                             mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
@@ -140,11 +143,8 @@ class TestRunBot:
                                 with pytest.raises(asyncio.CancelledError):
                                     await run_bot()
 
-                                # Verify startup notification function was called with user ID
-                                mock_send.assert_called_once()
-                                call_args = mock_send.call_args
-                                assert call_args[0][0] == "123456789"
-                                assert "Bot Online" in call_args[0][1]
+                                # Verify new startup notification function was called
+                                mock_send_startup.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_run_bot_notification_failure_logged(self):
@@ -170,12 +170,14 @@ class TestRunBot:
                     mock_app.updater.start_polling = AsyncMock()
                     mock_create_app.return_value = mock_app
 
-                    with patch("execqueue.workers.telegram.bot.send_notification_to_user") as mock_send:
-                        mock_send.return_value = False  # Simulate failure
+                    with patch("execqueue.workers.telegram.bot.send_startup_notification") as mock_send_startup:
+                        # Simulate notification failure (raises exception)
+                        mock_send_startup.side_effect = Exception("Notification failed")
                         
                         with patch("asyncio.Event") as mock_event_class:
                             mock_event = AsyncMock()
-                            mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
+                            # Don't raise CancelledError immediately, let the test complete normally
+                            mock_event.wait = AsyncMock()
                             mock_event_class.return_value = mock_event
 
                             with patch("asyncio.get_running_loop") as mock_loop:
@@ -183,8 +185,16 @@ class TestRunBot:
                                 mock_loop.return_value = mock_loop_instance
                                 mock_loop_instance.add_signal_handler = MagicMock()
 
-                                with pytest.raises(asyncio.CancelledError):
-                                    await run_bot()
+                                # Run for a short time then stop
+                                import asyncio
+                                task = asyncio.create_task(run_bot())
+                                await asyncio.sleep(0.1)  # Let the bot start and try to send notification
+                                task.cancel()
+                                
+                                try:
+                                    await task
+                                except asyncio.CancelledError:
+                                    pass  # Expected
 
                                 # Bot should still start despite notification failure
                                 mock_app.updater.start_polling.assert_called_once()

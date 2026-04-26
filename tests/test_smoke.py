@@ -32,3 +32,20 @@ def test_httpx_import():
         assert httpx is not None
     except ImportError:
         pytest.skip("httpx not installed")
+
+
+def test_openapi_health_routes_are_grouped_by_domain():
+    """Verify health endpoints are tagged by technical domain in OpenAPI."""
+    from execqueue.main import create_app
+
+    app = create_app()
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    assert paths["/health/live"]["get"]["tags"] == ["API"]
+    assert paths["/health/ready"]["get"]["tags"] == ["API"]
+    assert paths["/health/db"]["get"]["tags"] == ["DB"]
+    assert paths["/api/health"]["get"]["tags"] == ["API"]
+    assert paths["/db/health"]["get"]["tags"] == ["DB"]
+    assert paths["/telegram-bot/health"]["get"]["tags"] == ["Telegram Bot"]
+    assert paths["/health"]["get"]["tags"] == ["System"]

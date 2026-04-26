@@ -15,22 +15,25 @@ class RuntimeTestSettings(Settings):
 def test_get_database_url_uses_primary_database_in_development():
     settings = RuntimeTestSettings(
         app_env=RuntimeEnvironment.DEVELOPMENT,
-        database_url="postgresql://user:secret@localhost:5432/execqueue",
+        database_url="postgresql+psycopg://user:secret@localhost:5432/execqueue",
     )
 
-    assert get_database_url(settings) == "postgresql://user:secret@localhost:5432/execqueue"
+    assert (
+        get_database_url(settings)
+        == "postgresql+psycopg://user:secret@localhost:5432/execqueue"
+    )
 
 
 def test_get_database_url_uses_test_database_in_test_environment():
     settings = RuntimeTestSettings(
         app_env=RuntimeEnvironment.TEST,
-        database_url="postgresql://user:secret@localhost:5432/execqueue",
-        database_url_test="postgresql://tester:secret@localhost:5432/execqueue_test",
+        database_url="postgresql+psycopg://user:secret@localhost:5432/execqueue",
+        database_url_test="postgresql+psycopg://tester:secret@localhost:5432/execqueue_test",
     )
 
     assert (
         get_database_url(settings)
-        == "postgresql://tester:secret@localhost:5432/execqueue_test"
+        == "postgresql+psycopg://tester:secret@localhost:5432/execqueue_test"
     )
 
 
@@ -48,7 +51,7 @@ def test_get_database_url_requires_dedicated_test_database():
 def test_describe_database_target_redacts_credentials():
     settings = RuntimeTestSettings(
         app_env=RuntimeEnvironment.PRODUCTION,
-        database_url="postgresql://execqueue:super-secret@db.example.com:5432/execqueue",
+        database_url="postgresql+psycopg://execqueue:super-secret@db.example.com:5432/execqueue",
     )
 
     description = describe_database_target(settings)
@@ -56,5 +59,5 @@ def test_describe_database_target_redacts_credentials():
     assert description == {
         "environment": "production",
         "role": "primary",
-        "dsn": "postgresql://execqueue:***@db.example.com:5432/execqueue",
+        "dsn": "postgresql+psycopg://execqueue:***@db.example.com:5432/execqueue",
     }
