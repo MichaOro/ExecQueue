@@ -15,7 +15,11 @@ def test_health_endpoint_returns_ok():
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    payload = response.json()
+
+    assert payload["status"] == "ok"
+    assert payload["checks"]["api"]["status"] == "ok"
+    assert payload["checks"]["api"]["component"] == "api"
 
 
 def test_docs_endpoint_is_available():
@@ -61,6 +65,16 @@ def test_health_does_not_require_context_headers():
     response = client.get("/health")
 
     assert response.status_code == 200
+
+
+def test_health_endpoint_returns_aggregated_summary():
+    client = TestClient(app)
+
+    response = client.get("/health")
+    payload = response.json()
+
+    assert set(payload.keys()) == {"status", "checks"}
+    assert "api" in payload["checks"]
 
 
 def test_request_context_defaults_to_local_mode():
