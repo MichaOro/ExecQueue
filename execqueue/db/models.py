@@ -11,6 +11,9 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    ForeignKey,
+    Identity,
+    Integer,
     JSON,
     String,
     Text,
@@ -31,6 +34,19 @@ class TelegramUserRole(str, Enum):
     USER = "user"
     OPERATOR = "operator"
     ADMIN = "admin"
+
+
+class TaskCreatedByType(str, Enum):
+    """Supported task creator types."""
+
+    USER = "user"
+    AGENT = "agent"
+
+
+class TaskStatus(str, Enum):
+    """Initial task lifecycle states."""
+
+    BACKLOG = "backlog"
 
 
 class Project(Base):
@@ -97,6 +113,73 @@ class TelegramUser(Base):
     last_active: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class Task(Base):
+    """Persisted task record used by the API and Telegram integration."""
+
+    __tablename__ = "task"
+    __table_args__ = (
+        CheckConstraint(
+            "created_by_type IN ('user', 'agent')",
+            name="task_created_by_type_allowed",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    task_number: Mapped[int] = mapped_column(
+        Integer,
+        Identity(),
+        nullable=False,
+        unique=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        default="",
+        server_default="",
+    )
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=TaskStatus.BACKLOG.value,
+        server_default=TaskStatus.BACKLOG.value,
+    )
+    execution_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_by_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    project_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("project.id"),
+        nullable=True,
+    )
+    details: Mapped[dict[str, object]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

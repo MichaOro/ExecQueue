@@ -115,6 +115,50 @@ class Settings(BaseSettings):
         description="ASGI application import path used by the local API orchestrator.",
     )
 
+    # ACP Integration Configuration
+    acp_enabled: bool = Field(
+        default=False,
+        description="Whether ACP integration is enabled.",
+    )
+    acp_host: str = Field(
+        default="127.0.0.1",
+        description="Host used for a locally started ACP process.",
+    )
+    acp_port: int = Field(
+        default=8010,
+        ge=1,
+        le=65535,
+        description="Port used for a locally started ACP process.",
+    )
+    acp_auto_start: bool = Field(
+        default=False,
+        description="Whether the local orchestrator should auto-start ACP when enabled.",
+    )
+    acp_start_command: str | None = Field(
+        default=None,
+        description="Shell-style command used to start ACP as a local managed process.",
+    )
+    acp_endpoint_url: str | None = Field(
+        default=None,
+        description="ACP API endpoint URL.",
+    )
+    acp_api_key: str | None = Field(
+        default=None,
+        description="ACP API authentication key.",
+    )
+    acp_timeout: int = Field(
+        default=30,
+        ge=1,
+        le=120,
+        description="ACP request timeout in seconds (1-120).",
+    )
+    acp_retry_count: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Number of retry attempts for ACP requests (0-10).",
+    )
+
     @field_validator("database_url", "database_url_test")
     @classmethod
     def validate_postgres_driver(cls, value: str | None, info) -> str | None:

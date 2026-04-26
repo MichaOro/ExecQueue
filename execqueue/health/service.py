@@ -129,6 +129,7 @@ def format_component_name(component_name: str) -> str:
         "api": "API",
         "database": "Database",
         "telegram_bot": "Telegram Bot",
+        "acp": "ACP",
     }
     return aliases.get(component_name, component_name.replace("_", " ").title())
 

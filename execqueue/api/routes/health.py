@@ -183,6 +183,24 @@ def telegram_bot_component_health() -> dict[str, object]:
 
 
 @router.get(
+    "/acp/health",
+    summary="ACP component health check",
+    operation_id="acp_component_health_get",
+    tags=["ACP"],
+)
+def acp_component_health() -> dict[str, object]:
+    """Return health status for the ACP component.
+
+    Returns DEGRADED status when ACP is disabled (ACP_ENABLED=false),
+    which is not an error but indicates the component is unavailable.
+    Returns ERROR when ACP is enabled but not responding.
+    Returns OK when ACP is enabled and running.
+    """
+    result = get_health_by_component("acp")
+    return result.model_dump()
+
+
+@router.get(
     "/{component}/health",
     summary="Generic component-specific health check",
     operation_id="component_health_get",

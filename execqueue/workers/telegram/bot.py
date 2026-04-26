@@ -12,8 +12,13 @@ from pathlib import Path
 from execqueue.db.session import create_session
 from execqueue.settings import get_settings
 from execqueue.workers.telegram.commands import (
+    create_cancel,
+    create_prompt,
+    create_start,
+    create_task_type,
     get_health_command_message,
     get_start_message,
+    status_command,
 )
 from execqueue.workers.telegram.notifications import (
     build_startup_message,
@@ -29,7 +34,14 @@ logger = logging.getLogger(__name__)
 
 try:
     from telegram import Bot, Update
-    from telegram.ext import Application, CommandHandler, ContextTypes
+    from telegram.ext import (
+        Application,
+        CommandHandler,
+        ConversationHandler,
+        ContextTypes,
+        MessageHandler,
+    )
+    from telegram.ext import filters as Filters
 
     TELEGRAM_AVAILABLE = True
 except ImportError:
@@ -37,12 +49,18 @@ except ImportError:
     Bot = None  # type: ignore
     Application = None  # type: ignore
     CommandHandler = None  # type: ignore
+    ConversationHandler = None  # type: ignore
     ContextTypes = None  # type: ignore
+    MessageHandler = None  # type: ignore
+    Filters = None  # type: ignore
     Update = None  # type: ignore
 
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 HEALTH_FILE = PROJECT_ROOT / "ops" / "health" / "telegram_bot.json"
+
+# Conversation states for /create (imported from commands but re-exported here for registration)
+from execqueue.workers.telegram.commands import CREATE_PROMPT, CREATE_TASK_TYPE
 
 
 def persist_message_user(update: Update) -> None:
@@ -87,65 +105,77 @@ def write_health_status(status: str, detail: str = "", include_pid: bool = False
         logger.error("Failed to write health status: %s", exc)
 
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_command(update: Update, context: "ContextTypes.DEFAULT_TYPE | None") -> None:
     """Handle /start command."""
     persist_message_user(update)
     if update.message:
         await update.message.reply_text(get_start_message())
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /help command - shows commands not in /start, with role-based filtering."""
+async def help_command(update: Update, context: "ContextTypes.DEFAULT_TYPE | None") -> None:
+    """Handle /help command - shows commands with role-based filtering."""
     if not update.message:
         return
 
-    # Get user's role from database
+    # Get user's role from database using auth helper
     telegram_user_id = update.effective_user.id if update.effective_user else None
-    is_admin = False
+    role = None
+    is_active = False
 
     if telegram_user_id:
-        session = create_session()
         try:
-            from execqueue.db.models import TelegramUser
-            from sqlalchemy import select
+            from execqueue.workers.telegram.auth import get_user_info
 
-            user = session.execute(
-                select(TelegramUser).where(TelegramUser.telegram_id == telegram_user_id)
-            ).scalar_one_or_none()
-            is_admin = user is not None and user.role == "admin"
+            role, is_active = get_user_info(telegram_user_id)
         except Exception:
             logger.exception("Failed to check user role for help command")
-        finally:
-            session.close()
 
     # Build help message with role-based commands
-    help_message = (
-        "📖 *ExecQueue Bot Help*\n\n"
-        "Zusätzliche Befehle:\n"
-    )
+    help_message = "📖 *ExecQueue Bot Help*\n\n"
 
-    # Add admin-only commands
-    if is_admin:
-        help_message += "/restart - System neu starten (Admin)\n"
+    if is_active:
+        help_message += "Verfügbare Befehle:\n\n"
+        help_message += "/start - Bot starten\n"
+        help_message += "/health - Systemstatus prüfen\n"
 
-    if not is_admin:
-        help_message += "(Keine zusätzlichen Befehle für deine Rolle)\n"
+        # Task commands for admin/operator
+        if role in ["admin", "operator"]:
+            help_message += "\n📝 Aufgaben:\n"
+            help_message += "/create - Neue Aufgabe erstellen\n"
+            help_message += "/status <ID> - Aufgabestatus abfragen\n"
 
-    help_message += "\nFür weitere Informationen zur Nutzung besuchen Sie die Dokumentation."
+        # Admin-only commands
+        if role == "admin":
+            help_message += "\n⚙️ Administration:\n"
+            help_message += "/restart - System neu starten\n"
+    else:
+        help_message += "Zusätzliche Befehle:\n"
+        help_message += "/start - Bot neu starten\n"
+        help_message += "/health - Systemstatus prüfen\n"
+        help_message += "\n(Keine zusätzlichen Befehle für deine Rolle)"
 
-    await update.message.reply_text(help_message)
+    help_message += "\n\nFür weitere Informationen besuchen Sie die Dokumentation."
+
+    await update.message.reply_text(help_message, parse_mode="Markdown")
 
 
-async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def health_command(
+    update: Update, context: "ContextTypes.DEFAULT_TYPE | None"
+) -> None:
     """Handle /health command."""
     if update.message:
         await update.message.reply_text(get_health_command_message())
 
 
-async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def restart_command(
+    update: Update, context: "ContextTypes.DEFAULT_TYPE | None"
+) -> None:
     """Handle /restart command - Admin only.
     
-    Triggers system restart via API endpoint.
+    Supports:
+    - /restart - System restart (API + Bot)
+    - /restart acp - ACP restart only
+    - /restart all - Full restart (API + Bot + ACP)
     """
     if not update.message:
         return
@@ -155,19 +185,17 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     is_admin = False
 
     if telegram_user_id:
-        session = create_session()
         try:
             from execqueue.db.models import TelegramUser
             from sqlalchemy import select
 
-            user = session.execute(
-                select(TelegramUser).where(TelegramUser.telegram_id == telegram_user_id)
-            ).scalar_one_or_none()
-            is_admin = user is not None and user.role == "admin"
+            with create_session() as session:
+                user = session.execute(
+                    select(TelegramUser).where(TelegramUser.telegram_id == telegram_user_id)
+                ).scalar_one_or_none()
+                is_admin = user is not None and user.role == "admin"
         except Exception:
             logger.exception("Failed to check user role for restart command")
-        finally:
-            session.close()
 
     if not is_admin:
         await update.message.reply_text(
@@ -175,18 +203,57 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
-    # Send confirmation that restart is in progress
-    await update.message.reply_text(
-        "🔄 *System-Neustart wird vorbereitet...*\n\n"
-        "Sende Anfrage an API. Dies kann einen Moment dauern.",
-        parse_mode="Markdown"
+    # Parse restart type argument
+    restart_type = "system"  # default
+    if context and context.args:
+        arg = context.args[0].lower()
+        if arg in ("acp", "all"):
+            restart_type = arg
+        else:
+            await update.message.reply_text(
+                "❌ *Ungültiger Parameter*\n\n"
+                "Verfügbare Optionen:\n"
+                "/restart - System neu starten (API + Bot)\n"
+                "/restart acp - ACP neu starten\n"
+                "/restart all - Alle Komponenten neu starten",
+                parse_mode="Markdown"
+            )
+            return
+
+    # Send confirmation based on restart type
+    if restart_type == "acp":
+        await update.message.reply_text(
+            "🔄 *ACP-Neustart wird vorbereitet...*\n\n"
+            "Sende Anfrage an API. Dies kann einen Moment dauern.",
+            parse_mode="Markdown"
+        )
+    elif restart_type == "all":
+        await update.message.reply_text(
+            "🔄 *Vollständiger Neustart wird vorbereitet...*\n\n"
+            "Sende Anfrage an API. Dies kann einen Moment dauern.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            "🔄 *System-Neustart wird vorbereitet...*\n\n"
+            "Sende Anfrage an API. Dies kann einen Moment dauern.",
+            parse_mode="Markdown"
+        )
+
+    # Trigger appropriate restart via API (async, don't block)
+    from execqueue.workers.telegram.commands import (
+        trigger_acp_restart,
+        trigger_system_restart,
+        trigger_system_restart_all,
     )
 
-    # Trigger restart via API (async, don't block)
-    from execqueue.workers.telegram.commands import trigger_system_restart
-
     try:
-        success, message = await trigger_system_restart()
+        if restart_type == "acp":
+            success, message = await trigger_acp_restart()
+        elif restart_type == "all":
+            success, message = await trigger_system_restart_all()
+        else:
+            success, message = await trigger_system_restart()
         
         if success:
             await update.message.reply_text(
@@ -298,6 +365,24 @@ def create_bot_application(token: str, polling_timeout: int) -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("health", health_command))
     application.add_handler(CommandHandler("restart", restart_command))
+
+    # Task-related commands
+    application.add_handler(CommandHandler("status", status_command))
+
+    # /create conversation handler
+    create_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("create", create_start)],
+        states={
+            CREATE_TASK_TYPE: [
+                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_task_type)
+            ],
+            CREATE_PROMPT: [
+                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_prompt)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", create_cancel)],
+    )
+    application.add_handler(create_conv_handler)
 
     return application
 

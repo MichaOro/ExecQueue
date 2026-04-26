@@ -2,7 +2,14 @@
 
 from execqueue.db.base import Base, metadata
 from execqueue.db.engine import build_engine, get_engine
-from execqueue.db.models import Project, TelegramUser, TelegramUserRole
+from execqueue.db.models import (
+    Project,
+    Task,
+    TaskCreatedByType,
+    TaskStatus,
+    TelegramUser,
+    TelegramUserRole,
+)
 from execqueue.db.runtime import describe_database_target, get_database_url
 from execqueue.db.session import (
     build_session_factory,
@@ -14,6 +21,9 @@ from execqueue.db.session import (
 __all__ = [
     "Base",
     "Project",
+    "Task",
+    "TaskCreatedByType",
+    "TaskStatus",
     "TelegramUser",
     "TelegramUserRole",
     "build_engine",

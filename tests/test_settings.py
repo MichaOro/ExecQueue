@@ -85,6 +85,78 @@ class TestSettingsDefaults:
         settings = TestSettings()
         assert settings.execqueue_api_port == 8000
 
+    def test_acp_enabled_default(self):
+        """Test that acp_enabled defaults to False."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+        
+        settings = TestSettings()
+        assert settings.acp_enabled is False
+
+    def test_acp_host_default(self):
+        """Test that acp_host defaults to 127.0.0.1."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.acp_host == "127.0.0.1"
+
+    def test_acp_port_default(self):
+        """Test that acp_port defaults to 8010."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.acp_port == 8010
+
+    def test_acp_auto_start_default(self):
+        """Test that acp_auto_start defaults to False."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.acp_auto_start is False
+
+    def test_acp_start_command_default(self):
+        """Test that acp_start_command defaults to None."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.acp_start_command is None
+
+    def test_acp_endpoint_url_default(self):
+        """Test that acp_endpoint_url defaults to None."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+        
+        settings = TestSettings()
+        assert settings.acp_endpoint_url is None
+
+    def test_acp_api_key_default(self):
+        """Test that acp_api_key defaults to None."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+        
+        settings = TestSettings()
+        assert settings.acp_api_key is None
+
+    def test_acp_timeout_default(self):
+        """Test that acp_timeout defaults to 30."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+        
+        settings = TestSettings()
+        assert settings.acp_timeout == 30
+
+    def test_acp_retry_count_default(self):
+        """Test that acp_retry_count defaults to 3."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+        
+        settings = TestSettings()
+        assert settings.acp_retry_count == 3
+
 
 class TestSettingsFromEnvironment:
     """Tests for settings loaded from environment variables."""
@@ -196,6 +268,69 @@ class TestSettingsFromEnvironment:
             settings = Settings()
             assert settings.execqueue_api_port == 9000
 
+    def test_acp_enabled_from_env_true(self):
+        """Test that acp_enabled is loaded from environment."""
+        with patch.dict(os.environ, {"ACP_ENABLED": "true"}):
+            settings = Settings()
+            assert settings.acp_enabled is True
+
+    def test_acp_enabled_from_env_false(self):
+        """Test that acp_enabled can be set to false."""
+        with patch.dict(os.environ, {"ACP_ENABLED": "false"}):
+            settings = Settings()
+            assert settings.acp_enabled is False
+
+    def test_acp_host_from_env(self):
+        """Test that acp_host is loaded from environment."""
+        with patch.dict(os.environ, {"ACP_HOST": "0.0.0.0"}):
+            settings = Settings()
+            assert settings.acp_host == "0.0.0.0"
+
+    def test_acp_port_from_env(self):
+        """Test that acp_port is loaded from environment."""
+        with patch.dict(os.environ, {"ACP_PORT": "9010"}):
+            settings = Settings()
+            assert settings.acp_port == 9010
+
+    def test_acp_auto_start_from_env(self):
+        """Test that acp_auto_start is loaded from environment."""
+        with patch.dict(os.environ, {"ACP_AUTO_START": "true"}):
+            settings = Settings()
+            assert settings.acp_auto_start is True
+
+    def test_acp_start_command_from_env(self):
+        """Test that acp_start_command is loaded from environment."""
+        with patch.dict(os.environ, {"ACP_START_COMMAND": "python -m opencode_acp"}):
+            settings = Settings()
+            assert settings.acp_start_command == "python -m opencode_acp"
+
+    def test_acp_endpoint_url_from_env(self):
+        """Test that acp_endpoint_url is loaded from environment."""
+        with patch.dict(
+            os.environ,
+            {"ACP_ENDPOINT_URL": "https://api.acp.example.com/v1"},
+        ):
+            settings = Settings()
+            assert settings.acp_endpoint_url == "https://api.acp.example.com/v1"
+
+    def test_acp_api_key_from_env(self):
+        """Test that acp_api_key is loaded from environment."""
+        with patch.dict(os.environ, {"ACP_API_KEY": "test-api-key-123"}):
+            settings = Settings()
+            assert settings.acp_api_key == "test-api-key-123"
+
+    def test_acp_timeout_from_env(self):
+        """Test that acp_timeout is loaded from environment."""
+        with patch.dict(os.environ, {"ACP_TIMEOUT": "60"}):
+            settings = Settings()
+            assert settings.acp_timeout == 60
+
+    def test_acp_retry_count_from_env(self):
+        """Test that acp_retry_count is loaded from environment."""
+        with patch.dict(os.environ, {"ACP_RETRY_COUNT": "5"}):
+            settings = Settings()
+            assert settings.acp_retry_count == 5
+
 
 class TestSettingsValidation:
     """Tests for settings validation."""
@@ -278,6 +413,42 @@ class TestSettingsValidation:
         with patch.dict(os.environ, {"EXECQUEUE_API_PORT": "65535"}):
             settings = Settings()
             assert settings.execqueue_api_port == 65535
+
+    def test_acp_timeout_minimum(self):
+        """Test that acp_timeout respects minimum value."""
+        with patch.dict(os.environ, {"ACP_TIMEOUT": "1"}):
+            settings = Settings()
+            assert settings.acp_timeout == 1
+
+    def test_acp_port_minimum(self):
+        """Test that acp_port respects minimum value."""
+        with patch.dict(os.environ, {"ACP_PORT": "1"}):
+            settings = Settings()
+            assert settings.acp_port == 1
+
+    def test_acp_port_maximum(self):
+        """Test that acp_port respects maximum value."""
+        with patch.dict(os.environ, {"ACP_PORT": "65535"}):
+            settings = Settings()
+            assert settings.acp_port == 65535
+
+    def test_acp_timeout_maximum(self):
+        """Test that acp_timeout respects maximum value."""
+        with patch.dict(os.environ, {"ACP_TIMEOUT": "120"}):
+            settings = Settings()
+            assert settings.acp_timeout == 120
+
+    def test_acp_retry_count_minimum(self):
+        """Test that acp_retry_count respects minimum value."""
+        with patch.dict(os.environ, {"ACP_RETRY_COUNT": "0"}):
+            settings = Settings()
+            assert settings.acp_retry_count == 0
+
+    def test_acp_retry_count_maximum(self):
+        """Test that acp_retry_count respects maximum value."""
+        with patch.dict(os.environ, {"ACP_RETRY_COUNT": "10"}):
+            settings = Settings()
+            assert settings.acp_retry_count == 10
 
 
 class TestGetSettings:

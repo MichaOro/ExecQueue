@@ -17,7 +17,7 @@ def build_alembic_config(database_url: str) -> Config:
     return config
 
 
-def test_project_and_telegram_user_migrations_upgrade_and_downgrade(tmp_path, monkeypatch):
+def test_project_telegram_user_and_task_migrations_upgrade_and_downgrade(tmp_path, monkeypatch):
     database_path = tmp_path / "alembic_test.sqlite3"
     database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
 
@@ -34,6 +34,7 @@ def test_project_and_telegram_user_migrations_upgrade_and_downgrade(tmp_path, mo
 
     assert "project" in inspector.get_table_names()
     assert "telegram_users" in inspector.get_table_names()
+    assert "task" in inspector.get_table_names()
     columns = {column["name"] for column in inspector.get_columns("project")}
     assert columns == {
         "id",
@@ -71,13 +72,50 @@ def test_project_and_telegram_user_migrations_upgrade_and_downgrade(tmp_path, mo
     check_names = {constraint["name"] for constraint in check_constraints}
     assert "ck_telegram_users_telegram_users_role_allowed" in check_names
 
+    task_columns = {column["name"] for column in inspector.get_columns("task")}
+    assert task_columns == {
+        "id",
+        "task_number",
+        "title",
+        "prompt",
+        "type",
+        "status",
+        "execution_order",
+        "retry_count",
+        "max_retries",
+        "session_id",
+        "created_by_type",
+        "created_by_ref",
+        "project_id",
+        "details",
+        "created_at",
+        "updated_at",
+    }
+
+    task_unique_constraints = inspector.get_unique_constraints("task")
+    task_unique_names = {constraint["name"] for constraint in task_unique_constraints}
+    assert "uq_task_task_number" in task_unique_names
+
+    task_foreign_keys = inspector.get_foreign_keys("task")
+    foreign_key_names = {foreign_key["name"] for foreign_key in task_foreign_keys}
+    assert "fk_task_project_id_project" in foreign_key_names
+
+    task_indexes = inspector.get_indexes("task")
+    task_index_names = {index["name"] for index in task_indexes}
+    assert "ix_task_status" in task_index_names
+
+    task_checks = inspector.get_check_constraints("task")
+    task_check_names = {constraint["name"] for constraint in task_checks}
+    assert "ck_task_task_created_by_type_allowed" in task_check_names
+
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert version == "20260426_02"
+    assert version == "20260426_03"
 
     command.downgrade(config, "base")
 
     inspector = inspect(engine)
     assert "project" not in inspector.get_table_names()
     assert "telegram_users" not in inspector.get_table_names()
+    assert "task" not in inspector.get_table_names()
     engine.dispose()

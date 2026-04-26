@@ -145,8 +145,12 @@ py -m alembic upgrade head
 py -m alembic downgrade base
 ```
 
-The initial migration creates the `project` table with UUID primary key, unique
-`key`, runtime timestamps, and an `is_active` flag.
+The current migration chain creates:
+
+- `project` with UUID primary key, unique `key`, runtime timestamps, and an `is_active` flag
+- `telegram_users` with role and subscription defaults
+- `task` with UUID primary key, DB-owned `task_number`, `status=backlog`,
+  `retry_count=0`, JSON `details`, and optional `project_id` linkage
 
 ## Tests
 
@@ -174,6 +178,16 @@ py -m pytest tests/test_settings.py tests/test_db_runtime.py tests/test_db_engin
 py -m alembic upgrade head
 py -m alembic downgrade base
 ```
+
+### Task Integration Validation
+
+Die Telegram-Task-Integration wird bewusst mit einer kleinen, gezielten Testmenge abgesichert:
+
+- `tests/test_alembic_project_migration.py` validiert die Alembic-Erzeugung der `task`-Tabelle gegen die Test-DB
+- `tests/test_task_model.py` prueft ORM-Defaults und Constraints fuer `Task`
+- `tests/test_task_api.py` deckt `POST /api/tasks` und `GET /api/tasks/{task_number}/status` inklusive Fehlerfaellen ab
+- `tests/test_telegram_api_client.py` prueft die Bot-zu-API-Vertragsabbildung
+- `tests/test_telegram_commands.py` sichert Rollenpruefung, `/create`, `/status` und die erweiterte `/help`-Ausgabe ab
 
 ### Testinfrastruktur
 

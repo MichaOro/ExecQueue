@@ -39,21 +39,42 @@ run_step() {
 }
 
 main() {
-    local steps=(
-        "${SCRIPT_DIR}/api_restart.sh"
-        "${SCRIPT_DIR}/telegram_restart.sh"
-    )
+    # Load environment to check ACP_ENABLED
+    if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+        set -a
+        source "${PROJECT_ROOT}/.env"
+        set +a
+    fi
 
-    local names=(
-        "api_restart"
-        "telegram_restart"
-    )
+    # Build steps dynamically based on ACP configuration
+    local steps=()
+    local names=()
+
+    # Always restart API
+    steps+=("${SCRIPT_DIR}/api_restart.sh")
+    names+=("api_restart")
+
+    # Always restart Telegram Bot
+    steps+=("${SCRIPT_DIR}/telegram_restart.sh")
+    names+=("telegram_restart")
+
+    # Optionally restart ACP if enabled
+    case "${ACP_ENABLED:-false}" in
+        1|true|yes|on)
+            steps+=("${SCRIPT_DIR}/acp_restart.sh")
+            names+=("acp_restart")
+            log "ACP is enabled, will include ACP restart in global restart."
+            ;;
+        *)
+            log "ACP is disabled, skipping ACP restart in global restart."
+            ;;
+    esac
 
     local i
     for ((i = 0; i < ${#steps[@]}; i++)); do
         if ! run_step "${names[$i]}" "${steps[$i]}"; then
-            log "Global restart aborted."
-            log_to_file "Global restart aborted."
+            log "Global restart aborted at step: ${names[$i]}"
+            log_to_file "Global restart aborted at step: ${names[$i]}"
             exit 1
         fi
     done
