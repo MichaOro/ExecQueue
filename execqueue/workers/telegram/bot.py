@@ -1,9 +1,13 @@
-"""Telegram bot with polling and command handling."""
+"""Telegram bot self-health reporting."""
 
 import asyncio
+import json
 import logging
+import os
 import signal
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 from execqueue.settings import get_settings
 from execqueue.workers.telegram.commands import (
@@ -12,16 +16,13 @@ from execqueue.workers.telegram.commands import (
     get_start_message,
 )
 
-# Type hints for telegram module
-Bot: type
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Import telegram bot library lazily to avoid hard dependency when bot is disabled
+# Import telegram bot library lazily
 try:
     from telegram import Bot, Update
     from telegram.ext import Application, CommandHandler, ContextTypes
@@ -36,52 +37,61 @@ except ImportError:
     Update = None  # type: ignore
 
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /start command.
+# Health file path
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+HEALTH_FILE = PROJECT_ROOT / "ops" / "health" / "telegram_bot.json"
 
+
+def write_health_status(status: str, detail: str = "", include_pid: bool = False) -> None:
+    """Write bot health status to file for API to read.
+    
     Args:
-        update: The update object from Telegram.
-        context: The context object from telegram.ext.
+        status: Health status ("ok", "not_ok", "starting", "maintenance", etc.)
+        detail: Human-readable detail message
+        include_pid: If True, include PID for debugging (default: False)
     """
+    HEALTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    
+    health_data = {
+        "component": "telegram_bot",
+        "status": status,
+        "detail": detail,
+        "last_check": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    # PID is optional, only include if explicitly requested
+    if include_pid:
+        health_data["pid"] = os.getpid()
+    
+    try:
+        HEALTH_FILE.write_text(json.dumps(health_data, indent=2))
+        logger.debug(f"Health status written: {status}")
+    except Exception as e:
+        logger.error(f"Failed to write health status: {e}")
+
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /start command."""
     if update.message:
         await update.message.reply_text(get_start_message())
 
 
 async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /health command (placeholder).
-
-    Args:
-        update: The update object from Telegram.
-        context: The context object from telegram.ext.
-    """
+    """Handle /health command - returns bot's internal health."""
     if update.message:
         await update.message.reply_text(get_health_command_message())
 
 
 async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /restart command (placeholder).
-
-    Args:
-        update: The update object from Telegram.
-        context: The context object from telegram.ext.
-    """
+    """Handle /restart command."""
     if update.message:
         await update.message.reply_text(get_restart_command_message())
 
 
 def create_bot_application(token: str, polling_timeout: int) -> Application:
-    """Create and configure the Telegram bot application.
-
-    Args:
-        token: Telegram bot token.
-        polling_timeout: Timeout for polling in seconds.
-
-    Returns:
-        Configured Application instance.
-    """
+    """Create and configure the Telegram bot application."""
     application = Application.builder().token(token).build()
 
-    # Register command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("health", health_command))
     application.add_handler(CommandHandler("restart", restart_command))
@@ -89,53 +99,59 @@ def create_bot_application(token: str, polling_timeout: int) -> Application:
     return application
 
 
-async def run_bot() -> None:
-    """Run the Telegram bot with polling.
+async def health_reporter(polling_timeout: int) -> None:
+    """Periodically write health status to file."""
+    while True:
+        try:
+            write_health_status("ok", "Telegram bot is running and polling for updates.")
+        except Exception as e:
+            logger.error(f"Health reporter error: {e}")
+        
+        await asyncio.sleep(polling_timeout)  # Update health every polling cycle
 
-    This function:
-    1. Loads settings from environment
-    2. Validates bot is enabled and has a token
-    3. Creates the bot application
-    4. Registers signal handlers for graceful shutdown
-    5. Starts polling for updates
-    """
+
+async def run_bot() -> None:
+    """Run the Telegram bot with polling and health reporting."""
     settings = get_settings()
 
-    # Check if bot is enabled
     if not settings.telegram_bot_enabled:
         logger.info("Telegram bot is disabled (TELEGRAM_BOT_ENABLED=false)")
+        # Write disabled status
+        write_health_status("not_ok", "Telegram bot is disabled.")
         return
 
-    # Check if token is provided
     if not settings.telegram_bot_token:
         logger.error(
             "Telegram bot is enabled but TELEGRAM_BOT_TOKEN is not set. "
             "Please configure the bot token in your environment."
         )
+        write_health_status("not_ok", "Telegram bot enabled but token not set.")
         sys.exit(1)
 
-    # Check if telegram library is available
     if not TELEGRAM_AVAILABLE:
         logger.error(
             "python-telegram-bot is not installed. "
             "Please install it with: pip install python-telegram-bot"
         )
+        write_health_status("not_ok", "python-telegram-bot library not installed.")
         sys.exit(1)
 
-    logger.info("Starting Telegram bot with polling...")
+    logger.info("Starting Telegram bot with polling and health reporting...")
 
-    # Create bot application
+    # Write initial health status
+    write_health_status("starting", "Telegram bot is initializing...")
+
     application = create_bot_application(
         token=settings.telegram_bot_token,
         polling_timeout=settings.telegram_polling_timeout,
     )
 
-    # Setup signal handlers for graceful shutdown
     loop = asyncio.get_running_loop()
 
     def shutdown_handler() -> None:
         """Handle shutdown signals gracefully."""
         logger.info("Shutdown signal received, stopping bot...")
+        write_health_status("not_ok", "Telegram bot is shutting down.")
         application.stop()
         loop.stop()
 
@@ -143,28 +159,18 @@ async def run_bot() -> None:
         try:
             loop.add_signal_handler(sig, shutdown_handler)
         except NotImplementedError:
-            # Windows doesn't support add_signal_handler
             signal.signal(sig, lambda sig, frame: shutdown_handler())
 
-    # Start the bot
     await application.initialize()
     await application.start()
 
     logger.info("Bot started successfully. Press Ctrl+C to stop.")
 
-    # Send startup notification if admin chat ID is configured
-    if settings.telegram_admin_chat_id:
-        try:
-            bot: Bot = application.bot
-            await bot.send_message(
-                chat_id=settings.telegram_admin_chat_id,
-                text=get_start_message(),
-            )
-            logger.info("Startup notification sent to admin chat.")
-        except Exception as e:
-            logger.warning(f"Failed to send startup notification: {e}")
+    # Start health reporter task
+    health_task = asyncio.create_task(
+        health_reporter(settings.telegram_polling_timeout)
+    )
 
-    # Keep running until stopped
     await application.updater.start_polling(
         timeout=settings.telegram_polling_timeout,
         allowed_updates=Update.ALL_TYPES,
@@ -173,6 +179,15 @@ async def run_bot() -> None:
     # Wait for stop signal
     await asyncio.Event().wait()
 
+    # Cancel health reporter
+    health_task.cancel()
+    try:
+        await health_task
+    except asyncio.CancelledError:
+        pass
+
+    write_health_status("not_ok", "Telegram bot stopped.")
+
 
 def main() -> None:
     """Main entry point for the Telegram bot."""
@@ -180,8 +195,10 @@ def main() -> None:
         asyncio.run(run_bot())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
+        write_health_status("not_ok", "Telegram bot stopped by user.")
     except Exception as e:
         logger.error(f"Bot error: {e}")
+        write_health_status("not_ok", f"Bot error: {e}")
         sys.exit(1)
 
 

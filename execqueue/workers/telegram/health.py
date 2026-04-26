@@ -1,65 +1,74 @@
-"""Telegram bot health checks."""
+"""Telegram bot health checks - reads bot's self-reported health."""
 
-import os
+import json
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from execqueue.health.models import HealthCheckResult
+
+# Path to bot's health file
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+HEALTH_FILE = PROJECT_ROOT / "ops" / "health" / "telegram_bot.json"
+
+# Max age for health status before considering it stale (in seconds)
+HEALTH_STALE_THRESHOLD = 60
 
 
 def get_telegram_bot_healthcheck() -> HealthCheckResult:
     """Return the health state of the Telegram bot component.
     
-    Checks if the bot process is running by verifying the PID file
-    and confirming the process exists.
+    Reads the bot's self-reported health status from a JSON file
+    that the bot updates periodically.
     """
-    # Path to the bot PID file
-    ops_dir = Path(__file__).parent.parent.parent / "ops"
-    pid_file = ops_dir / "pids" / "telegram_bot.pid"
-    
-    # Check if PID file exists
-    if not pid_file.exists():
+    # Check if health file exists
+    if not HEALTH_FILE.exists():
         return HealthCheckResult(
             component="telegram_bot",
             status="not_ok",
-            detail="Bot PID file not found. Bot may not be running.",
+            detail="Bot health file not found. Bot may not be running or health reporting not configured.",
         )
     
-    # Read PID from file
+    # Read health status from file
     try:
-        pid = int(pid_file.read_text().strip())
-    except (ValueError, IOError) as e:
+        health_data = json.loads(HEALTH_FILE.read_text())
+        status = health_data.get("status", "not_ok")
+        detail = health_data.get("detail", "Unknown status")
+        last_check_str = health_data.get("last_check", "")
+        
+        # Check if health status is stale
+        if last_check_str:
+            try:
+                last_check = datetime.fromisoformat(last_check_str.replace('Z', '+00:00'))
+                now = datetime.now(timezone.utc)
+                age = (now - last_check).total_seconds()
+                
+                if age > HEALTH_STALE_THRESHOLD:
+                    return HealthCheckResult(
+                        component="telegram_bot",
+                        status="not_ok",
+                        detail=f"Bot health status is stale ({int(age)}s old). Bot may have crashed.",
+                    )
+            except (ValueError, TypeError):
+                pass  # Ignore parsing errors, use the status as-is
+        
+        # Add last check timestamp for debugging (optional)
+        if last_check_str:
+            detail = f"{detail} (last check: {last_check_str})"
+        
+        return HealthCheckResult(
+            component="telegram_bot",
+            status=status,
+            detail=detail,
+        )
+    except json.JSONDecodeError as e:
         return HealthCheckResult(
             component="telegram_bot",
             status="not_ok",
-            detail=f"Failed to read bot PID file: {e}",
+            detail=f"Bot health file contains invalid JSON: {e}",
         )
-    
-    # Check if process is running
-    try:
-        # On Unix, kill(0) checks if process exists without sending signal
-        os.kill(pid, 0)
-        return HealthCheckResult(
-            component="telegram_bot",
-            status="ok",
-            detail=f"Telegram bot is running with PID {pid}.",
-        )
-    except ProcessLookupError:
+    except Exception as e:
         return HealthCheckResult(
             component="telegram_bot",
             status="not_ok",
-            detail=f"Bot process {pid} not found. PID file may be stale.",
-        )
-    except PermissionError:
-        # Process exists but we don't have permission to signal it
-        # This still means the process is running
-        return HealthCheckResult(
-            component="telegram_bot",
-            status="ok",
-            detail=f"Telegram bot is running with PID {pid} (permission limited).",
-        )
-    except OSError as e:
-        return HealthCheckResult(
-            component="telegram_bot",
-            status="not_ok",
-            detail=f"Failed to check bot process: {e}",
+            detail=f"Failed to read bot health: {e}",
         )
