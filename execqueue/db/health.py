@@ -16,27 +16,33 @@ def get_database_healthcheck() -> HealthCheckResult:
     except ValueError:
         return HealthCheckResult(
             component="database",
-            status="degraded",
+            status="DEGRADED",
             detail="Database health check is not fully configured.",
+        )
+    except Exception:
+        return HealthCheckResult(
+            component="database",
+            status="DEGRADED",
+            detail="Database health check could not initialize its database driver.",
         )
 
     try:
         session.execute(text("SELECT 1"))
         return HealthCheckResult(
             component="database",
-            status="ok",
+            status="OK",
             detail="Database connectivity check succeeded.",
         )
     except SQLAlchemyError:
         return HealthCheckResult(
             component="database",
-            status="degraded",
+            status="DEGRADED",
             detail="Database connectivity check failed.",
         )
     except Exception:
         return HealthCheckResult(
             component="database",
-            status="degraded",
+            status="DEGRADED",
             detail="Database health check encountered an unexpected error.",
         )
     finally:

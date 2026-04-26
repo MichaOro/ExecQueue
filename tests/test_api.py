@@ -4,14 +4,14 @@ from execqueue.api.router import domain_router, system_router
 from execqueue.main import app, create_app
 
 
-def install_fake_healthchecks(monkeypatch, database_status: str = "ok") -> None:
+def install_fake_healthchecks(monkeypatch, database_status: str = "OK") -> None:
     from execqueue.health.models import HealthCheckResult
 
     def fake_healthchecks():
         return [
             lambda: HealthCheckResult(
                 component="api",
-                status="ok",
+                status="OK",
                 detail="FastAPI application and Swagger/OpenAPI endpoints are available.",
             ),
             lambda: HealthCheckResult(
@@ -19,7 +19,7 @@ def install_fake_healthchecks(monkeypatch, database_status: str = "ok") -> None:
                 status=database_status,
                 detail=(
                     "Database connectivity check succeeded."
-                    if database_status == "ok"
+                    if database_status == "OK"
                     else "Database connectivity check failed."
                 ),
             ),
@@ -34,7 +34,7 @@ def test_create_app_returns_fastapi_instance():
 
 
 def test_health_endpoint_returns_ok(monkeypatch):
-    install_fake_healthchecks(monkeypatch, database_status="ok")
+    install_fake_healthchecks(monkeypatch, database_status="OK")
     client = TestClient(app)
 
     response = client.get("/health")
@@ -42,9 +42,9 @@ def test_health_endpoint_returns_ok(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["status"] == "ok"
-    assert payload["checks"]["api"]["status"] == "ok"
-    assert payload["checks"]["database"]["status"] == "ok"
+    assert payload["status"] == "OK"
+    assert payload["checks"]["api"]["status"] == "OK"
+    assert payload["checks"]["database"]["status"] == "OK"
     assert payload["checks"]["api"]["component"] == "api"
 
 
@@ -86,7 +86,7 @@ def test_openapi_describes_shared_ready_context():
 
 
 def test_health_does_not_require_context_headers(monkeypatch):
-    install_fake_healthchecks(monkeypatch, database_status="ok")
+    install_fake_healthchecks(monkeypatch, database_status="OK")
     client = TestClient(app)
 
     response = client.get("/health")
@@ -105,7 +105,7 @@ def test_health_route_stays_tenant_neutral_in_openapi():
 
 
 def test_health_endpoint_returns_aggregated_summary(monkeypatch):
-    install_fake_healthchecks(monkeypatch, database_status="ok")
+    install_fake_healthchecks(monkeypatch, database_status="OK")
     client = TestClient(app)
 
     response = client.get("/health")
@@ -117,15 +117,15 @@ def test_health_endpoint_returns_aggregated_summary(monkeypatch):
 
 
 def test_health_endpoint_reports_degraded_when_database_check_fails(monkeypatch):
-    install_fake_healthchecks(monkeypatch, database_status="degraded")
+    install_fake_healthchecks(monkeypatch, database_status="DEGRADED")
     client = TestClient(app)
 
     response = client.get("/health")
     payload = response.json()
 
     assert response.status_code == 200
-    assert payload["status"] == "degraded"
-    assert payload["checks"]["database"]["status"] == "degraded"
+    assert payload["status"] == "DEGRADED"
+    assert payload["checks"]["database"]["status"] == "DEGRADED"
     assert "secret" not in payload["checks"]["database"]["detail"].lower()
 
 

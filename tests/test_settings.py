@@ -170,6 +170,17 @@ class TestSettingsFromEnvironment:
             settings = get_settings()
             assert settings.telegram_admin_user_id == "123456789"
 
+    def test_telegram_notification_user_id_supports_legacy_startup_env_name(self):
+        """Test that the legacy startup notification env name is still accepted."""
+        get_settings.cache_clear()
+        with patch.dict(
+            os.environ,
+            {"TELEGRAM_NOTIFICATION_STARTUP_USER_ID": "123456789"},
+            clear=False,
+        ):
+            settings = get_settings()
+            assert settings.telegram_notification_user_id == "123456789"
+
     def test_execqueue_api_host_from_env(self):
         """Test that execqueue_api_host is loaded from environment."""
         with patch.dict(os.environ, {"EXECQUEUE_API_HOST": "0.0.0.0"}):

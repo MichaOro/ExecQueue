@@ -22,7 +22,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import telegram bot library lazily
 try:
     from telegram import Bot, Update
     from telegram.ext import Application, CommandHandler, ContextTypes
@@ -37,37 +36,29 @@ except ImportError:
     Update = None  # type: ignore
 
 
-# Health file path
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 HEALTH_FILE = PROJECT_ROOT / "ops" / "health" / "telegram_bot.json"
 
 
 def write_health_status(status: str, detail: str = "", include_pid: bool = False) -> None:
-    """Write bot health status to file for API to read.
-    
-    Args:
-        status: Health status ("ok", "not_ok", "starting", "maintenance", etc.)
-        detail: Human-readable detail message
-        include_pid: If True, include PID for debugging (default: False)
-    """
+    """Write bot health status to file for API consumption."""
     HEALTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    
+
     health_data = {
         "component": "telegram_bot",
         "status": status,
         "detail": detail,
         "last_check": datetime.now(timezone.utc).isoformat(),
     }
-    
-    # PID is optional, only include if explicitly requested
+
     if include_pid:
         health_data["pid"] = os.getpid()
-    
+
     try:
         HEALTH_FILE.write_text(json.dumps(health_data, indent=2))
-        logger.debug(f"Health status written: {status}")
-    except Exception as e:
-        logger.error(f"Failed to write health status: {e}")
+        logger.debug("Health status written: %s", status)
+    except Exception as exc:
+        logger.error("Failed to write health status: %s", exc)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,7 +68,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /health command - returns bot's internal health."""
+    """Handle /health command."""
     if update.message:
         await update.message.reply_text(get_health_command_message())
 
@@ -89,25 +80,17 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def send_notification_to_user(user_id: str, message: str) -> bool:
-    """Send a notification message to a specific user.
-    
-    Args:
-        user_id: Telegram user ID to send the message to.
-        message: The message text to send.
-        
-    Returns:
-        True if the message was sent successfully, False otherwise.
-    """
+    """Send a notification message to a specific Telegram user."""
     settings = get_settings()
-    
+
     if not user_id:
         logger.debug("No user ID configured, skipping notification")
         return False
-    
+
     if not TELEGRAM_AVAILABLE:
         logger.error("Cannot send notification: python-telegram-bot not installed")
         return False
-    
+
     try:
         bot = Bot(token=settings.telegram_bot_token)
         await bot.send_message(
@@ -115,28 +98,21 @@ async def send_notification_to_user(user_id: str, message: str) -> bool:
             text=message,
             parse_mode="Markdown",
         )
-        logger.info(f"Notification sent to user {user_id}")
+        logger.info("Notification sent to user %s", user_id)
         return True
-    except Exception as e:
-        logger.error(f"Failed to send notification to user {user_id}: {e}")
+    except Exception as exc:
+        logger.error("Failed to send notification to user %s: %s", user_id, exc)
         return False
 
 
 async def send_notification_to_channel(message: str) -> bool:
-    """Send a notification message to the configured notification user.
-    
-    Args:
-        message: The message text to send to the user.
-        
-    Returns:
-        True if the message was sent successfully, False otherwise.
-    """
+    """Send a notification message to the configured notification user."""
     settings = get_settings()
-    
+
     if not settings.telegram_notification_user_id:
         logger.debug("Notification user not configured, skipping notification")
         return False
-    
+
     return await send_notification_to_user(settings.telegram_notification_user_id, message)
 
 
@@ -152,14 +128,14 @@ def create_bot_application(token: str, polling_timeout: int) -> Application:
 
 
 async def health_reporter(polling_timeout: int) -> None:
-    """Periodically write health status to file."""
+    """Periodically update the bot health file."""
     while True:
         try:
             write_health_status("ok", "Telegram bot is running and polling for updates.")
-        except Exception as e:
-            logger.error(f"Health reporter error: {e}")
-        
-        await asyncio.sleep(polling_timeout)  # Update health every polling cycle
+        except Exception as exc:
+            logger.error("Health reporter error: %s", exc)
+
+        await asyncio.sleep(polling_timeout)
 
 
 async def run_bot() -> None:
@@ -168,7 +144,6 @@ async def run_bot() -> None:
 
     if not settings.telegram_bot_enabled:
         logger.info("Telegram bot is disabled (TELEGRAM_BOT_ENABLED=false)")
-        # Write disabled status
         write_health_status("not_ok", "Telegram bot is disabled.")
         return
 
@@ -189,8 +164,6 @@ async def run_bot() -> None:
         sys.exit(1)
 
     logger.info("Starting Telegram bot with polling and health reporting...")
-
-    # Write initial health status
     write_health_status("starting", "Telegram bot is initializing...")
 
     application = create_bot_application(
@@ -218,28 +191,22 @@ async def run_bot() -> None:
 
     logger.info("Bot started successfully. Press Ctrl+C to stop.")
 
-    # Send online notification to user if configured
     online_message = (
-        "🟢 *Bot Online*\n\n"
-        "Der ExecQueue Bot ist jetzt online und steht zur Verfügung.\n"
+        "\U0001F7E2 *Bot Online*\n\n"
+        "Der ExecQueue Bot ist jetzt online und steht zur Verfuegung.\n"
         f"Startzeit: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
     )
     await send_notification_to_user(settings.telegram_notification_user_id, online_message)
 
-    # Start health reporter task
-    health_task = asyncio.create_task(
-        health_reporter(settings.telegram_polling_timeout)
-    )
+    health_task = asyncio.create_task(health_reporter(settings.telegram_polling_timeout))
 
     await application.updater.start_polling(
         timeout=settings.telegram_polling_timeout,
         allowed_updates=Update.ALL_TYPES,
     )
 
-    # Wait for stop signal
     await asyncio.Event().wait()
 
-    # Cancel health reporter
     health_task.cancel()
     try:
         await health_task
@@ -256,9 +223,9 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
         write_health_status("not_ok", "Telegram bot stopped by user.")
-    except Exception as e:
-        logger.error(f"Bot error: {e}")
-        write_health_status("not_ok", f"Bot error: {e}")
+    except Exception as exc:
+        logger.error("Bot error: %s", exc)
+        write_health_status("not_ok", f"Bot error: {exc}")
         sys.exit(1)
 
 

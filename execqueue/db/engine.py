@@ -15,6 +15,11 @@ def build_engine(settings: Settings) -> Engine:
     """Build a SQLAlchemy engine for the configured database target."""
     database_url = get_database_url(settings)
     url = make_url(database_url)
+
+    if url.drivername == "postgresql":
+        url = url.set(drivername="postgresql+psycopg")
+        database_url = url.render_as_string(hide_password=False)
+
     engine_kwargs: dict[str, object] = {
         "echo": settings.database_echo,
         "pool_pre_ping": settings.database_pool_pre_ping,

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-HealthStatus = Literal["ok", "degraded", "not_ok"]
+HealthStatus = Literal["OK", "DEGRADED", "ERROR"]
 
 
 class HealthCheckResult(BaseModel):

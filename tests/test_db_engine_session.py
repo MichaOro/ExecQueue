@@ -45,6 +45,19 @@ def test_build_engine_uses_configured_postgres_url_without_connecting():
     engine.dispose()
 
 
+def test_build_engine_upgrades_plain_postgres_url_to_psycopg_driver():
+    settings = RuntimeTestSettings(
+        app_env=RuntimeEnvironment.PRODUCTION,
+        database_url="postgresql://user:secret@localhost:5432/execqueue",
+    )
+
+    engine = build_engine(settings)
+
+    assert engine.dialect.name == "postgresql"
+    assert str(engine.url) == "postgresql+psycopg://user:***@localhost:5432/execqueue"
+    engine.dispose()
+
+
 def test_build_session_factory_creates_sqlalchemy_sessions():
     settings = RuntimeTestSettings(
         app_env=RuntimeEnvironment.TEST,

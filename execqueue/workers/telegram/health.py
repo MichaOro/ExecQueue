@@ -24,7 +24,7 @@ def get_telegram_bot_healthcheck() -> HealthCheckResult:
     if not HEALTH_FILE.exists():
         return HealthCheckResult(
             component="telegram_bot",
-            status="not_ok",
+            status="ERROR",
             detail="Bot health file not found. Bot may not be running or health reporting not configured.",
         )
     
@@ -45,7 +45,7 @@ def get_telegram_bot_healthcheck() -> HealthCheckResult:
                 if age > HEALTH_STALE_THRESHOLD:
                     return HealthCheckResult(
                         component="telegram_bot",
-                        status="not_ok",
+                        status="ERROR",
                         detail=f"Bot health status is stale ({int(age)}s old). Bot may have crashed.",
                     )
             except (ValueError, TypeError):
@@ -55,20 +55,28 @@ def get_telegram_bot_healthcheck() -> HealthCheckResult:
         if last_check_str:
             detail = f"{detail} (last check: {last_check_str})"
         
+        # Map legacy status values to new enum
+        status_mapping = {
+            "ok": "OK",
+            "degraded": "DEGRADED",
+            "not_ok": "ERROR",
+        }
+        normalized_status = status_mapping.get(status, "ERROR")
+        
         return HealthCheckResult(
             component="telegram_bot",
-            status=status,
+            status=normalized_status,
             detail=detail,
         )
     except json.JSONDecodeError as e:
         return HealthCheckResult(
             component="telegram_bot",
-            status="not_ok",
+            status="ERROR",
             detail=f"Bot health file contains invalid JSON: {e}",
         )
     except Exception as e:
         return HealthCheckResult(
             component="telegram_bot",
-            status="not_ok",
+            status="ERROR",
             detail=f"Failed to read bot health: {e}",
         )

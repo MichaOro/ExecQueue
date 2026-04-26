@@ -41,13 +41,11 @@ def healthcheck() -> dict[str, object]:
         result = check()
         results[result.component] = result.model_dump()
 
-    statuses = {result["status"] for result in results.values()}
-    if "not_ok" in statuses:
-        overall_status = "not_ok"
-    elif "degraded" in statuses:
-        overall_status = "degraded"
-    else:
-        overall_status = "ok"
+    # Use the aggregation service for consistent status calculation
+    from execqueue.health.service import aggregate_system_status
+    
+    components = [HealthCheckResult(**result) for result in results.values()]
+    overall_status = aggregate_system_status(components)
     
     return {
         "status": overall_status,

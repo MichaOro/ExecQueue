@@ -1,8 +1,9 @@
 """Central runtime configuration for ExecQueue."""
 
+import os
 from enum import Enum
 from functools import lru_cache
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -82,6 +83,10 @@ class Settings(BaseSettings):
     )
     telegram_notification_user_id: str | None = Field(
         default=None,
+        validation_alias=AliasChoices(
+            "TELEGRAM_NOTIFICATION_USER_ID",
+            "TELEGRAM_NOTIFICATION_STARTUP_USER_ID",
+        ),
         description="User ID for notification events like bot online (optional). Use your Telegram user ID.",
     )
     execqueue_api_host: str = Field(
@@ -128,6 +133,17 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "DATABASE_URL and DATABASE_URL_TEST must not point to the same database."
                 )
+
+        if (
+            self.telegram_notification_user_id is None
+            and "TELEGRAM_NOTIFICATION_STARTUP_USER_ID" not in os.environ
+            and "TELEGRAM_NOTIFICATION_USER_ID" not in os.environ
+        ):
+            for key, value in os.environ.items():
+                if key.upper() == "TELEGRAM_NOTIFICATION_STARTUP_USER_ID":
+                    self.telegram_notification_user_id = value
+                    break
+
         return self
 
 
