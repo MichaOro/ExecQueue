@@ -1,8 +1,6 @@
 """Telegram bot commands and command list."""
 
-import time
-
-from execqueue.health.service import get_overall_health
+from execqueue.health.service import get_overall_health, render_health_report, status_to_emoji
 
 
 def get_command_list() -> list[dict[str, str]]:
@@ -29,44 +27,14 @@ def get_start_message() -> str:
 
 def _get_status_emoji(status: str) -> str:
     """Get emoji for a health status."""
-    status_emojis = {
-        "OK": "\U0001F7E2",
-        "DEGRADED": "\U0001F7E1",
-        "ERROR": "\U0001F534",
-    }
-    return status_emojis.get(status, "\U0001F534")
+    return status_to_emoji(status)
 
 
 def get_health_command_message() -> str:
-    """Generate the /health response with detailed component status."""
+    """Generate the compact /health response."""
     try:
         health_summary = get_overall_health()
-
-        overall_emoji = _get_status_emoji(health_summary.status)
-        status_names = {"OK": "OK", "DEGRADED": "Degraded", "ERROR": "Error"}
-        overall_status = status_names.get(health_summary.status, "Unknown")
-        separator = "─" * 30
-
-        message = "\U0001F3E5 *System Health Report*\n\n"
-        message += f"Overall Status: {overall_emoji} *{overall_status}*\n\n"
-        message += f"{separator}\n"
-        message += "*Component Status:*\n"
-        message += f"{separator}\n"
-
-        for component, result in health_summary.checks.items():
-            emoji = _get_status_emoji(result.status)
-            status_name = status_names.get(result.status, result.status)
-            formatted_name = component.replace("_", " ").title()
-
-            message += f"\n{emoji} *{formatted_name}*\n"
-            message += f"   Status: {status_name}\n"
-            message += f"   Detail: {result.detail}\n"
-
-        message += f"\n{separator}"
-        message += f"\n\U0001F4CB Last updated: {time.monotonic():.0f}s ago"
-
-        return message
-
+        return render_health_report(list(health_summary.checks.values()))
     except Exception as exc:
         return (
             "\u274C *Health Check Error*\n\n"

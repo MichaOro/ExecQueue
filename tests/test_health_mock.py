@@ -16,7 +16,7 @@ class TestHealthCommandMock:
         """Test that health message shows system status."""
         message = get_health_command_message()
 
-        assert "system health report" in message.lower() or "health check error" in message.lower()
+        assert "system health" in message.lower() or "health check error" in message.lower()
 
     def test_health_message_structure(self):
         """Test that health message has expected structure."""

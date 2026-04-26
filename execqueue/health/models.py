@@ -1,10 +1,16 @@
 """Shared health result models."""
 
-from typing import Literal
+from enum import Enum
 
 from pydantic import BaseModel
 
-HealthStatus = Literal["OK", "DEGRADED", "ERROR"]
+
+class HealthStatus(str, Enum):
+    """Supported health states for components and the overall system."""
+
+    OK = "OK"
+    DEGRADED = "DEGRADED"
+    ERROR = "ERROR"
 
 
 class HealthCheckResult(BaseModel):
@@ -12,7 +18,7 @@ class HealthCheckResult(BaseModel):
 
     component: str
     status: HealthStatus
-    detail: str
+    detail: str | None = None
 
 
 class HealthSummary(BaseModel):

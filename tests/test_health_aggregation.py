@@ -2,9 +2,13 @@
 
 import pytest
 
-from execqueue.health.models import HealthCheckResult
+from execqueue.health.models import HealthCheckResult, HealthStatus
 from execqueue.health.service import (
     aggregate_system_status,
+    format_component_name,
+    format_status_label,
+    get_overall_health,
+    normalize_health_component,
     render_health_report,
     status_to_emoji,
 )
@@ -60,6 +64,15 @@ class TestAggregateSystemStatus:
         with pytest.raises(Exception):
             HealthCheckResult(component="api", status="UNKNOWN", detail="Unknown")
 
+    def test_unknown_status_in_raw_component_is_treated_as_error(self):
+        assert aggregate_system_status([{"component": "api", "status": "UNKNOWN"}]) == "ERROR"
+
+    def test_missing_status_in_raw_component_is_treated_as_degraded(self):
+        assert aggregate_system_status([{"component": "api", "detail": "missing"}]) == "DEGRADED"
+
+    def test_partial_component_data_is_treated_as_degraded(self):
+        assert aggregate_system_status([{"component": "api", "status": "OK"}]) == "DEGRADED"
+
     def test_single_ok_component(self):
         components = [HealthCheckResult(component="api", status="OK", detail="OK")]
         assert aggregate_system_status(components) == "OK"
@@ -89,6 +102,17 @@ class TestStatusToEmoji:
         assert status_to_emoji("UNKNOWN") == "🔴"
 
 
+class TestFormattingHelpers:
+    def test_format_component_name_uses_aliases(self):
+        assert format_component_name("api") == "API"
+        assert format_component_name("telegram_bot") == "Telegram Bot"
+
+    def test_format_status_label_is_user_friendly(self):
+        assert format_status_label("OK") == "OK"
+        assert format_status_label("DEGRADED") == "Degraded"
+        assert format_status_label("ERROR") == "Error"
+
+
 class TestRenderHealthReport:
     """Tests for the render_health_report function."""
 
@@ -106,16 +130,14 @@ class TestRenderHealthReport:
         ]
         report = render_health_report(components)
 
-        assert "🟢 api" in report
-        assert "🟡 database" in report
+        assert "🟢 API — OK" in report
+        assert "🟡 Database — Degraded" in report
 
-    def test_report_contains_legend(self):
+    def test_report_contains_separator(self):
         components = [HealthCheckResult(component="api", status="OK", detail="OK")]
         report = render_health_report(components)
 
-        assert "🔴 = mindestens ein Service DOWN / ERROR" in report
-        assert "🟡 = kein Fehler, aber mindestens ein Service DEGRADED" in report
-        assert "🟢 = alle Services OK" in report
+        assert "━━━━━━━━━━━━━━━━━━━━" in report
 
     def test_report_format_with_error(self):
         components = [HealthCheckResult(component="api", status="ERROR", detail="Down")]
@@ -145,4 +167,50 @@ class TestRenderHealthReport:
         report = render_health_report([])
 
         assert "🔴 *System Health*" in report
-        assert "━━━━━━━━━━━━━━━━━━━" in report
+        assert "━━━━━━━━━━━━━━━━━━━━" in report
+
+    def test_partial_component_report_shows_degraded_system(self):
+        report = render_health_report([{"component": "api", "status": "OK"}])
+
+        assert report.startswith("🟡 *System Health*")
+        assert "🟡 API — Degraded" in report
+
+
+class TestNormalizeHealthComponent:
+    def test_missing_status_normalizes_to_degraded(self):
+        result = normalize_health_component({"component": "api"}, fallback_name="api")
+
+        assert result.status == HealthStatus.DEGRADED
+        assert result.detail == "Component health data is incomplete: missing status."
+
+
+class TestOverallHealth:
+    def test_timeout_is_treated_as_error(self, monkeypatch):
+        def slow_check():
+            raise TimeoutError("Too slow")
+
+        monkeypatch.setattr(
+            "execqueue.health.service.get_registered_healthchecks",
+            lambda: [slow_check],
+        )
+
+        summary = get_overall_health()
+
+        assert summary.status == "ERROR"
+        assert summary.checks["slow_check"].status == "ERROR"
+        assert summary.checks["slow_check"].detail == "Health check timed out."
+
+    def test_partial_data_is_treated_as_degraded(self, monkeypatch):
+        def partial_check():
+            return {"component": "api", "status": "OK"}
+
+        monkeypatch.setattr(
+            "execqueue.health.service.get_registered_healthchecks",
+            lambda: [partial_check],
+        )
+
+        summary = get_overall_health()
+
+        assert summary.status == "DEGRADED"
+        assert summary.checks["api"].status == "DEGRADED"
+        assert summary.checks["api"].detail == "Component health data is incomplete."
