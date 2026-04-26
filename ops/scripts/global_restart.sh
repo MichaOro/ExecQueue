@@ -40,11 +40,13 @@ run_step() {
 
 main() {
     local steps=(
-        "${SCRIPT_DIR}/swagger_restart.sh"
+        "${SCRIPT_DIR}/api_restart.sh"
+        "${SCRIPT_DIR}/telegram_restart.sh"
     )
 
     local names=(
-        "swagger_restart"
+        "api_restart"
+        "telegram_restart"
     )
 
     local i
