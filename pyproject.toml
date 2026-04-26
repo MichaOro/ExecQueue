@@ -11,6 +11,9 @@ dependencies = [
     "fastapi>=0.109",
 ]
 
+[tool.setuptools.packages.find]
+include = ["execqueue*"]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

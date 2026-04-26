@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from execqueue.api.dependencies import get_request_context, resolve_request_context
+from execqueue.api.router import domain_router, system_router
 from execqueue.main import app, create_app
 
 
@@ -55,8 +55,8 @@ def test_openapi_describes_shared_ready_context():
     info = payload["info"]
 
     assert info["title"] == "ExecQueue API"
-    assert "multi-tenant" in info["description"]
-    assert "single-tenant local" in info["summary"].lower()
+    assert "X-Tenant-ID" in info["description"]
+    assert "tenant-neutral" in info["summary"].lower()
 
 
 def test_health_does_not_require_context_headers():
@@ -65,6 +65,16 @@ def test_health_does_not_require_context_headers():
     response = client.get("/health")
 
     assert response.status_code == 200
+
+
+def test_health_route_stays_tenant_neutral_in_openapi():
+    client = TestClient(app)
+
+    response = client.get("/openapi.json")
+    payload = response.json()
+    health_operation = payload["paths"]["/health"]["get"]
+
+    assert "parameters" not in health_operation
 
 
 def test_health_endpoint_returns_aggregated_summary():
@@ -77,29 +87,9 @@ def test_health_endpoint_returns_aggregated_summary():
     assert "api" in payload["checks"]
 
 
-def test_request_context_defaults_to_local_mode():
-    context = resolve_request_context()
+def test_router_structure_separates_system_and_domain_areas():
+    system_paths = {route.path for route in system_router.routes}
+    domain_paths = {route.path for route in domain_router.routes}
 
-    assert context.mode == "single-tenant-local"
-    assert context.tenant_id is None
-    assert context.project_id is None
-
-
-def test_request_context_accepts_shared_headers():
-    context = resolve_request_context(
-        tenant_id="tenant-alpha",
-        project_id="project-42",
-    )
-
-    assert context.mode == "shared"
-    assert context.tenant_id == "tenant-alpha"
-    assert context.project_id == "project-42"
-
-
-def test_fastapi_dependency_wrapper_maps_headers():
-    context = get_request_context(
-        x_tenant_id="tenant-alpha",
-        x_project_id="project-42",
-    )
-
-    assert context.mode == "shared"
+    assert "/health" in system_paths
+    assert domain_paths == set()
