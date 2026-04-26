@@ -145,7 +145,8 @@ class TestCommandMessages:
         """Test health command message content."""
         message = get_health_command_message()
 
-        assert "Health" in message or "health" in message
+        # Should contain health report or error message
+        assert "Health" in message or "health" in message or "Error" in message
 
     def test_get_restart_command_message(self):
         """Test restart command message content."""

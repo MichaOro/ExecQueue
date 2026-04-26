@@ -6,11 +6,35 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic_settings import SettingsConfigDict
 
-from execqueue.settings import Settings, get_settings
+from execqueue.settings import RuntimeEnvironment, Settings, get_settings
 
 
 class TestSettingsDefaults:
     """Tests for default settings values."""
+
+    def test_app_env_default(self):
+        """Test that app_env defaults to development."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.app_env is RuntimeEnvironment.DEVELOPMENT
+
+    def test_database_url_default(self):
+        """Test that database_url defaults to None."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.database_url is None
+
+    def test_database_url_test_default(self):
+        """Test that database_url_test defaults to None."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.database_url_test is None
 
     def test_telegram_bot_token_default(self):
         """Test that telegram_bot_token defaults to None."""
@@ -37,13 +61,13 @@ class TestSettingsDefaults:
         settings = TestSettings()
         assert settings.telegram_polling_timeout == 30
 
-    def test_telegram_admin_chat_id_default(self):
-        """Test that telegram_admin_chat_id defaults to None."""
+    def test_telegram_admin_user_id_default(self):
+        """Test that telegram_admin_user_id defaults to None."""
         class TestSettings(Settings):
             model_config = SettingsConfigDict(env_file="", extra="ignore")
         
         settings = TestSettings()
-        assert settings.telegram_admin_chat_id is None
+        assert settings.telegram_admin_user_id is None
 
     def test_execqueue_api_host_default(self):
         """Test that execqueue_api_host defaults to 127.0.0.1."""
@@ -64,6 +88,54 @@ class TestSettingsDefaults:
 
 class TestSettingsFromEnvironment:
     """Tests for settings loaded from environment variables."""
+
+    def test_app_env_from_env(self):
+        """Test that app_env is loaded from environment."""
+        with patch.dict(os.environ, {"APP_ENV": "production"}, clear=False):
+            settings = Settings()
+            assert settings.app_env is RuntimeEnvironment.PRODUCTION
+
+    def test_database_url_from_env(self):
+        """Test that database_url is loaded from environment."""
+        with patch.dict(
+            os.environ,
+            {"DATABASE_URL": "postgresql://user:secret@localhost:5432/execqueue"},
+            clear=False,
+        ):
+            settings = Settings()
+            assert settings.database_url == "postgresql://user:secret@localhost:5432/execqueue"
+
+    def test_database_url_test_from_env(self):
+        """Test that database_url_test is loaded from environment."""
+        with patch.dict(
+            os.environ,
+            {"DATABASE_URL_TEST": "postgresql://user:secret@localhost:5432/execqueue_test"},
+            clear=False,
+        ):
+            settings = Settings()
+            assert (
+                settings.database_url_test
+                == "postgresql://user:secret@localhost:5432/execqueue_test"
+            )
+
+    def test_get_settings_uses_database_url_test_when_app_env_is_test(self):
+        """Test that cached settings select the explicit test DB in test runtime."""
+        get_settings.cache_clear()
+        with patch.dict(
+            os.environ,
+            {
+                "APP_ENV": "test",
+                "DATABASE_URL": "postgresql://user:secret@localhost:5432/execqueue",
+                "DATABASE_URL_TEST": "postgresql://user:secret@localhost:5432/execqueue_test",
+            },
+            clear=False,
+        ):
+            settings = get_settings()
+            assert settings.app_env is RuntimeEnvironment.TEST
+            assert (
+                settings.active_database_url
+                == "postgresql://user:secret@localhost:5432/execqueue_test"
+            )
 
     def test_telegram_bot_token_from_env(self):
         """Test that telegram_bot_token is loaded from environment."""
@@ -89,11 +161,14 @@ class TestSettingsFromEnvironment:
             settings = Settings()
             assert settings.telegram_polling_timeout == 45
 
-    def test_telegram_admin_chat_id_from_env(self):
-        """Test that telegram_admin_chat_id is loaded from environment."""
-        with patch.dict(os.environ, {"TELEGRAM_ADMIN_CHAT_ID": "123456789"}):
-            settings = Settings()
-            assert settings.telegram_admin_chat_id == "123456789"
+    def test_telegram_admin_user_id_from_env(self):
+        """Test that telegram_admin_user_id is loaded from environment."""
+        with patch.dict(os.environ, {"TELEGRAM_ADMIN_USER_ID": "123456789"}):
+            from execqueue.settings import get_settings
+            get_settings.cache_clear()
+            
+            settings = get_settings()
+            assert settings.telegram_admin_user_id == "123456789"
 
     def test_execqueue_api_host_from_env(self):
         """Test that execqueue_api_host is loaded from environment."""
@@ -110,6 +185,58 @@ class TestSettingsFromEnvironment:
 
 class TestSettingsValidation:
     """Tests for settings validation."""
+
+    def test_active_database_url_uses_primary_database_outside_tests(self):
+        """Test that non-test runtime uses DATABASE_URL."""
+        settings = Settings(
+            app_env=RuntimeEnvironment.DEVELOPMENT,
+            database_url="postgresql://user:secret@localhost:5432/execqueue",
+        )
+        assert settings.active_database_url == "postgresql://user:secret@localhost:5432/execqueue"
+
+    def test_active_database_url_uses_test_database_in_test_env(self):
+        """Test that test runtime uses DATABASE_URL_TEST."""
+        settings = Settings(
+            app_env=RuntimeEnvironment.TEST,
+            database_url="postgresql://user:secret@localhost:5432/execqueue",
+            database_url_test="postgresql://user:secret@localhost:5432/execqueue_test",
+        )
+        assert (
+            settings.active_database_url
+            == "postgresql://user:secret@localhost:5432/execqueue_test"
+        )
+
+    def test_active_database_url_requires_primary_database(self):
+        """Test that non-test runtime does not silently continue without DATABASE_URL."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings(app_env=RuntimeEnvironment.PRODUCTION)
+
+        with pytest.raises(ValueError, match="DATABASE_URL must be set"):
+            _ = settings.active_database_url
+
+    def test_active_database_url_requires_test_database(self):
+        """Test that test runtime does not fall back to the primary database."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings(
+            app_env=RuntimeEnvironment.TEST,
+            database_url="postgresql://user:secret@localhost:5432/execqueue",
+        )
+
+        with pytest.raises(ValueError, match="DATABASE_URL_TEST must be set"):
+            _ = settings.active_database_url
+
+    def test_database_urls_must_not_match_across_prod_and_test(self):
+        """Test that test and primary database URLs cannot be identical."""
+        with pytest.raises(ValueError, match="must not point to the same database"):
+            Settings(
+                app_env=RuntimeEnvironment.TEST,
+                database_url="postgresql://user:secret@localhost:5432/execqueue",
+                database_url_test="postgresql://user:secret@localhost:5432/execqueue",
+            )
 
     def test_telegram_polling_timeout_minimum(self):
         """Test that polling timeout respects minimum value."""

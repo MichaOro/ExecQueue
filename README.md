@@ -105,6 +105,47 @@ resolution, or deployment-based tenant defaults yet.
 pip install -e ".[dev]"
 ```
 
+### Environment
+
+Copy `.env.example` to `.env` and set separate PostgreSQL URLs for normal runtime
+and tests.
+
+```bash
+APP_ENV=development
+DATABASE_URL=postgresql://execqueue:change-me@localhost:5432/execqueue
+DATABASE_URL_TEST=postgresql://execqueue_test:change-me@localhost:5432/execqueue_test
+```
+
+The runtime never falls back from `DATABASE_URL_TEST` to `DATABASE_URL`. Tests
+must use the dedicated test database URL exclusively.
+
+### Database Runtime Base
+
+`execqueue.settings.Settings` now exposes:
+
+- `APP_ENV` with `development`, `test`, and `production`
+- `DATABASE_URL` for non-test runtime
+- `DATABASE_URL_TEST` for pytest or explicit `APP_ENV=test`
+
+`execqueue.db.runtime.describe_database_target()` returns only a redacted DSN for
+safe diagnostics. Credentials are not logged.
+
+### Database Migrations
+
+Alembic is configured in `alembic/` and uses the same settings-based database
+selection as the runtime. There is no productive schema creation via
+`create_all()`.
+
+Common commands:
+
+```bash
+py -m alembic upgrade head
+py -m alembic downgrade base
+```
+
+The initial migration creates the `project` table with UUID primary key, unique
+`key`, runtime timestamps, and an `is_active` flag.
+
 ## Tests
 
 Minimaler Testansatz mit pytest.
@@ -112,7 +153,24 @@ Minimaler Testansatz mit pytest.
 ### Ausführung
 
 ```bash
-pytest
+py -m pytest
+```
+
+### DB-Validierung
+
+Für den DB-bezogenen Validierungslauf gilt:
+
+- Tests dürfen nie mit `APP_ENV=production` laufen.
+- `DATABASE_URL_TEST` muss von `DATABASE_URL` getrennt sein.
+- Alembic- und Health-Validierung laufen ausschließlich gegen die Testdatenbank.
+
+Empfohlene Kommandos:
+
+```bash
+py -m pytest
+py -m pytest tests/test_settings.py tests/test_db_runtime.py tests/test_db_engine_session.py tests/test_alembic_project_migration.py tests/test_db_health.py tests/test_validation_guard.py
+py -m alembic upgrade head
+py -m alembic downgrade base
 ```
 
 ### Testinfrastruktur

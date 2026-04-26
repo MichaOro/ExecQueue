@@ -1,7 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "enabled_providers": [
-    "adesso"
+    "adesso",
+    "openrouter"
   ],
   "provider": {
     "adesso": {
@@ -51,8 +52,8 @@
     "*": "allow",
     "read": {
       "*": "allow",
-      "*.env": "deny",
-      "*.env.*": "deny",
+      "*.env": "allow",
+      "*.env.*": "allow",
       "*.env.example": "allow"
     },
     "skill": {

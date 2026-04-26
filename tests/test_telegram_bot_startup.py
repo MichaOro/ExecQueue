@@ -104,7 +104,7 @@ class TestRunBot:
 
     @pytest.mark.asyncio
     async def test_run_bot_sends_startup_notification(self):
-        """Test that run_bot sends startup notification when chat ID is configured."""
+        """Test that run_bot sends startup notification when notification user is configured."""
         with patch.dict(os.environ, {}, clear=True):
             from execqueue.settings import get_settings
             get_settings.cache_clear()
@@ -114,7 +114,7 @@ class TestRunBot:
                 mock_settings.telegram_bot_enabled = True
                 mock_settings.telegram_bot_token = "test_token"
                 mock_settings.telegram_polling_timeout = 30
-                mock_settings.telegram_admin_chat_id = "123456789"
+                mock_settings.telegram_notification_user_id = "123456789"
                 mock_get_settings.return_value = mock_settings
 
                 with patch("execqueue.workers.telegram.bot.create_bot_application") as mock_create_app:
@@ -122,58 +122,11 @@ class TestRunBot:
                     mock_app.initialize = AsyncMock()
                     mock_app.start = AsyncMock()
                     mock_app.stop = AsyncMock()
-                    mock_app.bot = MagicMock()
-                    mock_app.bot.send_message = AsyncMock()
                     mock_app.updater = MagicMock()
                     mock_app.updater.start_polling = AsyncMock()
                     mock_create_app.return_value = mock_app
 
-                    with patch("asyncio.Event") as mock_event_class:
-                        mock_event = AsyncMock()
-                        mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
-                        mock_event_class.return_value = mock_event
-
-                        with patch("asyncio.get_running_loop") as mock_loop:
-                            mock_loop_instance = MagicMock()
-                            mock_loop.return_value = mock_loop_instance
-                            mock_loop_instance.add_signal_handler = MagicMock()
-
-                            with pytest.raises(asyncio.CancelledError):
-                                await run_bot()
-
-                            # Verify startup notification was sent
-                            mock_app.bot.send_message.assert_called_once()
-                            call_args = mock_app.bot.send_message.call_args
-                            assert call_args[1]["chat_id"] == "123456789"
-                            assert "Welcome" in call_args[1]["text"]
-
-    @pytest.mark.asyncio
-    async def test_run_bot_notification_failure_logged(self):
-        """Test that notification failure is logged but doesn't stop bot."""
-        with patch.dict(os.environ, {}, clear=True):
-            from execqueue.settings import get_settings
-            get_settings.cache_clear()
-
-            with patch("execqueue.workers.telegram.bot.get_settings") as mock_get_settings:
-                mock_settings = MagicMock()
-                mock_settings.telegram_bot_enabled = True
-                mock_settings.telegram_bot_token = "test_token"
-                mock_settings.telegram_polling_timeout = 30
-                mock_settings.telegram_admin_chat_id = "invalid_chat_id"
-                mock_get_settings.return_value = mock_settings
-
-                with patch("execqueue.workers.telegram.bot.create_bot_application") as mock_create_app:
-                    mock_app = MagicMock()
-                    mock_app.initialize = AsyncMock()
-                    mock_app.start = AsyncMock()
-                    mock_app.stop = AsyncMock()
-                    mock_app.bot = MagicMock()
-                    mock_app.bot.send_message = AsyncMock(side_effect=Exception("Chat not found"))
-                    mock_app.updater = MagicMock()
-                    mock_app.updater.start_polling = AsyncMock()
-                    mock_create_app.return_value = mock_app
-
-                    with patch("execqueue.workers.telegram.bot.logger") as mock_logger:
+                    with patch("execqueue.workers.telegram.bot.send_notification_to_user") as mock_send:
                         with patch("asyncio.Event") as mock_event_class:
                             mock_event = AsyncMock()
                             mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
@@ -187,8 +140,52 @@ class TestRunBot:
                                 with pytest.raises(asyncio.CancelledError):
                                     await run_bot()
 
-                                # Verify warning was logged
-                                mock_logger.warning.assert_called()
+                                # Verify startup notification function was called with user ID
+                                mock_send.assert_called_once()
+                                call_args = mock_send.call_args
+                                assert call_args[0][0] == "123456789"
+                                assert "Bot Online" in call_args[0][1]
+
+    @pytest.mark.asyncio
+    async def test_run_bot_notification_failure_logged(self):
+        """Test that notification failure is logged but doesn't stop bot."""
+        with patch.dict(os.environ, {}, clear=True):
+            from execqueue.settings import get_settings
+            get_settings.cache_clear()
+
+            with patch("execqueue.workers.telegram.bot.get_settings") as mock_get_settings:
+                mock_settings = MagicMock()
+                mock_settings.telegram_bot_enabled = True
+                mock_settings.telegram_bot_token = "test_token"
+                mock_settings.telegram_polling_timeout = 30
+                mock_settings.telegram_notification_user_id = "123456789"
+                mock_get_settings.return_value = mock_settings
+
+                with patch("execqueue.workers.telegram.bot.create_bot_application") as mock_create_app:
+                    mock_app = MagicMock()
+                    mock_app.initialize = AsyncMock()
+                    mock_app.start = AsyncMock()
+                    mock_app.stop = AsyncMock()
+                    mock_app.updater = MagicMock()
+                    mock_app.updater.start_polling = AsyncMock()
+                    mock_create_app.return_value = mock_app
+
+                    with patch("execqueue.workers.telegram.bot.send_notification_to_user") as mock_send:
+                        mock_send.return_value = False  # Simulate failure
+                        
+                        with patch("asyncio.Event") as mock_event_class:
+                            mock_event = AsyncMock()
+                            mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
+                            mock_event_class.return_value = mock_event
+
+                            with patch("asyncio.get_running_loop") as mock_loop:
+                                mock_loop_instance = MagicMock()
+                                mock_loop.return_value = mock_loop_instance
+                                mock_loop_instance.add_signal_handler = MagicMock()
+
+                                with pytest.raises(asyncio.CancelledError):
+                                    await run_bot()
+
                                 # Bot should still start despite notification failure
                                 mock_app.updater.start_polling.assert_called_once()
 

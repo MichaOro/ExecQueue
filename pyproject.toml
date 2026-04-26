@@ -8,8 +8,11 @@ version = "0.1.0"
 description = "ExecQueue - Execution Queue System"
 requires-python = ">=3.10"
 dependencies = [
+    "alembic>=1.13",
     "fastapi>=0.109",
     "pydantic-settings>=2.0",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
 ]
 
 [tool.setuptools.packages.find]

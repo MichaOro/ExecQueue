@@ -2,9 +2,8 @@
 
 from fastapi import APIRouter, HTTPException
 
-from execqueue.health.models import HealthCheckResult, HealthSummary
+from execqueue.health.models import HealthCheckResult
 from execqueue.health.registry import get_registered_healthchecks
-from execqueue.workers.telegram.health import get_telegram_bot_healthcheck
 
 router = APIRouter()
 
@@ -41,9 +40,14 @@ def healthcheck() -> dict[str, object]:
     for check in get_registered_healthchecks():
         result = check()
         results[result.component] = result.model_dump()
-    
-    # Check all statuses (results.values() are dicts now)
-    overall_status = "ok" if all(r["status"] == "ok" for r in results.values()) else "not_ok"
+
+    statuses = {result["status"] for result in results.values()}
+    if "not_ok" in statuses:
+        overall_status = "not_ok"
+    elif "degraded" in statuses:
+        overall_status = "degraded"
+    else:
+        overall_status = "ok"
     
     return {
         "status": overall_status,

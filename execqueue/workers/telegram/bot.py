@@ -88,6 +88,58 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(get_restart_command_message())
 
 
+async def send_notification_to_user(user_id: str, message: str) -> bool:
+    """Send a notification message to a specific user.
+    
+    Args:
+        user_id: Telegram user ID to send the message to.
+        message: The message text to send.
+        
+    Returns:
+        True if the message was sent successfully, False otherwise.
+    """
+    settings = get_settings()
+    
+    if not user_id:
+        logger.debug("No user ID configured, skipping notification")
+        return False
+    
+    if not TELEGRAM_AVAILABLE:
+        logger.error("Cannot send notification: python-telegram-bot not installed")
+        return False
+    
+    try:
+        bot = Bot(token=settings.telegram_bot_token)
+        await bot.send_message(
+            chat_id=user_id,
+            text=message,
+            parse_mode="Markdown",
+        )
+        logger.info(f"Notification sent to user {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send notification to user {user_id}: {e}")
+        return False
+
+
+async def send_notification_to_channel(message: str) -> bool:
+    """Send a notification message to the configured notification user.
+    
+    Args:
+        message: The message text to send to the user.
+        
+    Returns:
+        True if the message was sent successfully, False otherwise.
+    """
+    settings = get_settings()
+    
+    if not settings.telegram_notification_user_id:
+        logger.debug("Notification user not configured, skipping notification")
+        return False
+    
+    return await send_notification_to_user(settings.telegram_notification_user_id, message)
+
+
 def create_bot_application(token: str, polling_timeout: int) -> Application:
     """Create and configure the Telegram bot application."""
     application = Application.builder().token(token).build()
@@ -165,6 +217,14 @@ async def run_bot() -> None:
     await application.start()
 
     logger.info("Bot started successfully. Press Ctrl+C to stop.")
+
+    # Send online notification to user if configured
+    online_message = (
+        "🟢 *Bot Online*\n\n"
+        "Der ExecQueue Bot ist jetzt online und steht zur Verfügung.\n"
+        f"Startzeit: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC"
+    )
+    await send_notification_to_user(settings.telegram_notification_user_id, online_message)
 
     # Start health reporter task
     health_task = asyncio.create_task(
