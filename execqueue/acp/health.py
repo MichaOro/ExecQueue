@@ -12,7 +12,7 @@ from execqueue.health.models import HealthCheckResult
 from execqueue.settings import AcpOperatingMode, get_settings, resolve_acp_mode
 
 # ACP health status file location
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ACP_HEALTH_FILE = PROJECT_ROOT / "ops" / "health" / "acp.json"
 
 # Staleness threshold in seconds (consistent with Telegram bot)

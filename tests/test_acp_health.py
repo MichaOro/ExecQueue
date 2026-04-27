@@ -282,6 +282,12 @@ class TestWriteAcpHealthStatus:
 
         assert health_file.exists()
 
+    def test_acp_health_file_constant_points_to_repo_ops_dir(self):
+        from execqueue.acp.health import ACP_HEALTH_FILE
+
+        expected = Path(__file__).resolve().parents[1] / "ops" / "health" / "acp.json"
+        assert ACP_HEALTH_FILE == expected
+
 
 class TestAcpHealthAggregation:
     """Tests for ACP participation in health aggregation."""

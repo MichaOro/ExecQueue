@@ -69,8 +69,8 @@ The bot starts polling only when `TELEGRAM_BOT_ENABLED=true` and `TELEGRAM_BOT_T
 #### Available Commands
 
 - `/start` - Shows welcome message and command list
-- `/health` - Placeholder (planned, currently inactive)
-- `/restart` - Placeholder (planned, currently inactive)
+- `/health` - Shows the aggregated system health report
+- `/restart` - Admin-only restart command for system, ACP, or all components
 
 #### Manual Validation
 
@@ -82,7 +82,7 @@ The bot starts polling only when `TELEGRAM_BOT_ENABLED=true` and `TELEGRAM_BOT_T
 
 #### Notes
 
-- `/health` and `/restart` commands return placeholder messages and do not perform any system actions yet.
+- `/restart` is restricted to Telegram admins and the API restart routes require the `X-Admin-Token` header.
 - The bot uses long-polling for updates.
 - Shutdown is handled gracefully with a bounded timeout to avoid hanging restarts.
 - Token is never logged or exposed in runtime output.

@@ -77,6 +77,14 @@ class TestSettingsDefaults:
         settings = TestSettings()
         assert settings.telegram_admin_user_id is None
 
+    def test_system_admin_token_default(self):
+        """Test that system_admin_token defaults to None."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.system_admin_token is None
+
     def test_execqueue_api_host_default(self):
         """Test that execqueue_api_host defaults to 127.0.0.1."""
         class TestSettings(Settings):
@@ -204,6 +212,16 @@ class TestSettingsFromEnvironment:
                 settings.database_url_test
                 == "postgresql+psycopg://user:secret@localhost:5432/execqueue_test"
             )
+
+    def test_system_admin_token_from_env(self):
+        """Test that system_admin_token is loaded from environment."""
+        with patch.dict(
+            os.environ,
+            {"SYSTEM_ADMIN_TOKEN": "super-secret-admin-token"},
+            clear=False,
+        ):
+            settings = Settings()
+            assert settings.system_admin_token == "super-secret-admin-token"
 
     def test_get_settings_uses_database_url_test_when_app_env_is_test(self):
         """Test that cached settings select the explicit test DB in test runtime."""

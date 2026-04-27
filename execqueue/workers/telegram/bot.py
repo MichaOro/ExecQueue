@@ -338,7 +338,7 @@ async def restart_command(
                 user = session.execute(
                     select(TelegramUser).where(TelegramUser.telegram_id == telegram_user_id)
                 ).scalar_one_or_none()
-                is_admin = user is not None and user.role == "admin"
+                is_admin = user is not None and user.role == "admin" and user.is_active
         except Exception:
             logger.exception("Failed to check user role for restart command")
 
@@ -410,10 +410,10 @@ async def restart_command(
                 f"❌ *Neustart fehlgeschlagen*\n\n{message}",
                 parse_mode="Markdown"
             )
-    except Exception as exc:
+    except Exception:
         logger.exception("Error during restart command")
         await update.message.reply_text(
-            f"❌ *Fehler beim Neustart*\n\nEin unerwarteter Fehler ist aufgetreten:\n{str(exc)}",
+            "❌ *Fehler beim Neustart*\n\nEin unerwarteter Fehler ist aufgetreten. Bitte Logs oder Health pruefen.",
             parse_mode="Markdown"
         )
 

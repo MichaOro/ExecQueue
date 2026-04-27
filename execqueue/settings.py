@@ -116,6 +116,10 @@ class Settings(BaseSettings):
         default=None,
         description="User ID for admin notifications (optional). Use your Telegram user ID.",
     )
+    system_admin_token: str | None = Field(
+        default=None,
+        description="Shared secret required for privileged system restart API endpoints.",
+    )
     telegram_notification_user_id: str | None = Field(
         default=None,
         description="User ID for notification events (DEPRECATED: Use DB subscriptions instead).",

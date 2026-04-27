@@ -1,5 +1,6 @@
 """Tests for ACP lifecycle operations."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -119,16 +120,18 @@ class TestRestartAcp:
             acp_start_command="python -m acp",
         )
 
-        with (
-            patch("execqueue.acp.lifecycle.get_settings", return_value=settings),
-            patch("pathlib.Path.exists", return_value=True),
-            patch("execqueue.acp.lifecycle.subprocess.run") as mock_run,
-        ):
+        with patch("execqueue.acp.lifecycle.get_settings", return_value=settings), patch(
+            "execqueue.acp.lifecycle.subprocess.run"
+        ) as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stderr = ""
             mock_run.return_value.stdout = ""
 
-            result = restart_acp()
+            with patch(
+                "execqueue.acp.lifecycle.ACP_RESTART_SCRIPT",
+                Path("X:/IdeaProjects/ExecQueue/ops/scripts/acp_restart.sh"),
+            ):
+                result = restart_acp()
 
         assert result.status == "success"
         assert "initiated successfully" in result.message.lower()
@@ -143,16 +146,18 @@ class TestRestartAcp:
             acp_start_command="python -m acp",
         )
 
-        with (
-            patch("execqueue.acp.lifecycle.get_settings", return_value=settings),
-            patch("pathlib.Path.exists", return_value=True),
-            patch("execqueue.acp.lifecycle.subprocess.run") as mock_run,
-        ):
+        with patch("execqueue.acp.lifecycle.get_settings", return_value=settings), patch(
+            "execqueue.acp.lifecycle.subprocess.run"
+        ) as mock_run:
             mock_run.return_value.returncode = 1
             mock_run.return_value.stderr = "Script failed"
             mock_run.return_value.stdout = ""
 
-            result = restart_acp()
+            with patch(
+                "execqueue.acp.lifecycle.ACP_RESTART_SCRIPT",
+                Path("X:/IdeaProjects/ExecQueue/ops/scripts/acp_restart.sh"),
+            ):
+                result = restart_acp()
 
         assert result.status == "failed"
         assert "failed" in result.message.lower()
@@ -166,14 +171,15 @@ class TestRestartAcp:
             acp_start_command="python -m acp",
         )
 
-        with (
-            patch("execqueue.acp.lifecycle.get_settings", return_value=settings),
-            patch("pathlib.Path.exists", return_value=False),
+        with patch("execqueue.acp.lifecycle.get_settings", return_value=settings), patch(
+            "execqueue.acp.lifecycle.ACP_RESTART_SCRIPT",
+            Path("X:/IdeaProjects/ExecQueue/ops/scripts/missing_acp_restart.sh"),
         ):
             result = restart_acp()
 
         assert result.status == "failed"
-        assert "script not found" in result.message.lower()
+        assert result.message == "ACP restart failed."
+        assert result.details == {"reason": "script_not_found"}
 
     def test_restart_local_managed_handles_timeout(self):
         """Test that restart handles subprocess timeout."""
@@ -186,14 +192,22 @@ class TestRestartAcp:
             acp_start_command="python -m acp",
         )
 
-        with (
-            patch("execqueue.acp.lifecycle.get_settings", return_value=settings),
-            patch("pathlib.Path.exists", return_value=True),
-            patch("execqueue.acp.lifecycle.subprocess.run") as mock_run,
-        ):
+        with patch("execqueue.acp.lifecycle.get_settings", return_value=settings), patch(
+            "execqueue.acp.lifecycle.subprocess.run"
+        ) as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=30)
 
-            result = restart_acp()
+            with patch(
+                "execqueue.acp.lifecycle.ACP_RESTART_SCRIPT",
+                Path("X:/IdeaProjects/ExecQueue/ops/scripts/acp_restart.sh"),
+            ):
+                result = restart_acp()
 
         assert result.status == "failed"
         assert "timed out" in result.message.lower()
+
+    def test_restart_script_constant_points_to_repo_ops_dir(self):
+        from execqueue.acp.lifecycle import ACP_RESTART_SCRIPT
+
+        expected = Path(__file__).resolve().parents[1] / "ops" / "scripts" / "acp_restart.sh"
+        assert ACP_RESTART_SCRIPT == expected

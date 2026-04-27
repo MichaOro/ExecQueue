@@ -7,7 +7,7 @@ and operator feedback without requiring real infrastructure.
 from unittest.mock import patch
 
 import httpx
-import pytest
+from pathlib import Path
 
 from execqueue.acp.health import get_acp_healthcheck, probe_acp_endpoint
 from execqueue.acp.lifecycle import restart_acp
@@ -67,9 +67,7 @@ class TestExternalEndpointFlow:
         ):
             result = get_acp_healthcheck()
 
-        # Note: The probe is called during health check for external endpoint
-        # The result should be OK if probe succeeds
-        assert result.status in ("OK", "DEGRADED")  # May be DEGRADED if probe not mocked correctly
+        assert result.status == "OK"
 
     def test_health_error_when_external_endpoint_unreachable(self):
         """Health returns ERROR when external endpoint is unreachable."""
@@ -85,8 +83,7 @@ class TestExternalEndpointFlow:
         ):
             result = get_acp_healthcheck()
 
-        # Should be ERROR or DEGRADED depending on implementation
-        assert result.status in ("ERROR", "DEGRADED")
+        assert result.status == "ERROR"
 
     def test_restart_external_managed_when_reachable(self):
         """Restart returns external_managed when endpoint is reachable."""
@@ -137,16 +134,18 @@ class TestLocalManagedProcessFlow:
             acp_start_command="python -m acp",
         )
 
-        with (
-            patch("execqueue.acp.lifecycle.get_settings", return_value=settings),
-            patch("pathlib.Path.exists", return_value=True),
-            patch("execqueue.acp.lifecycle.subprocess.run") as mock_run,
-        ):
+        with patch("execqueue.acp.lifecycle.get_settings", return_value=settings), patch(
+            "execqueue.acp.lifecycle.subprocess.run"
+        ) as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stderr = ""
             mock_run.return_value.stdout = ""
 
-            result = restart_acp()
+            with patch(
+                "execqueue.acp.lifecycle.ACP_RESTART_SCRIPT",
+                Path("X:/IdeaProjects/ExecQueue/ops/scripts/acp_restart.sh"),
+            ):
+                result = restart_acp()
 
         assert result.status == "success"
         mock_run.assert_called_once()
@@ -235,7 +234,7 @@ class TestHealthStaleness:
 
         with (
             patch("execqueue.acp.health.get_settings", return_value=settings),
-            patch("pathlib.Path.exists", return_value=False),
+            patch("execqueue.acp.health.ACP_HEALTH_FILE", Path("X:/IdeaProjects/ExecQueue/ops/health/missing_acp.json")),
         ):
             result = get_acp_healthcheck()
 
@@ -255,16 +254,18 @@ class TestRestartFailureHandling:
             acp_start_command="python -m acp",
         )
 
-        with (
-            patch("execqueue.acp.lifecycle.get_settings", return_value=settings),
-            patch("pathlib.Path.exists", return_value=True),
-            patch("execqueue.acp.lifecycle.subprocess.run") as mock_run,
-        ):
+        with patch("execqueue.acp.lifecycle.get_settings", return_value=settings), patch(
+            "execqueue.acp.lifecycle.subprocess.run"
+        ) as mock_run:
             mock_run.return_value.returncode = 1
             mock_run.return_value.stderr = "Error: Connection refused"
             mock_run.return_value.stdout = ""
 
-            result = restart_acp()
+            with patch(
+                "execqueue.acp.lifecycle.ACP_RESTART_SCRIPT",
+                Path("X:/IdeaProjects/ExecQueue/ops/scripts/acp_restart.sh"),
+            ):
+                result = restart_acp()
 
         assert result.status == "failed"
         # Ensure no secrets or stack traces in message

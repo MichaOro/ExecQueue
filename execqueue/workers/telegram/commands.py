@@ -6,13 +6,9 @@ import logging
 
 import httpx
 
-from execqueue.acp.lifecycle import restart_acp
-from execqueue.health.service import (
-    get_overall_health,
-    render_health_report,
-    status_to_emoji,
-)
-from execqueue.settings import AcpOperatingMode, get_settings, resolve_acp_mode
+from execqueue.acp.lifecycle import LifecycleResult, restart_acp
+from execqueue.health.service import get_overall_health, render_health_report, status_to_emoji
+from execqueue.settings import get_settings
 from execqueue.workers.telegram.api_client import api_client
 from execqueue.workers.telegram.auth import get_user_info
 
@@ -33,6 +29,7 @@ except ImportError:
 CREATE_TASK_TYPE = 1
 CREATE_TITLE = 2
 CREATE_PROMPT = 3
+ACP_RESTART_SKIPPED_STATUSES = {"disabled", "external_managed"}
 
 
 def get_command_list() -> list[dict[str, str]]:
@@ -67,79 +64,52 @@ async def trigger_system_restart() -> tuple[bool, str]:
         return False, f"Restart failed: {error_msg}"
     except httpx.TimeoutException:
         return False, "Restart request timed out."
-    except Exception as exc:
-        return False, f"Restart failed: {exc}"
+    except Exception:
+        logger.exception("Unexpected error while triggering system restart")
+        return False, "Restart failed due to an unexpected error."
+
+
+def _render_acp_restart_feedback(result: LifecycleResult) -> tuple[bool, str]:
+    """Map lifecycle results to safe Telegram operator feedback."""
+    if result.status == "success":
+        return True, "ACP-Neustart ausgefuehrt."
+    if result.status == "disabled":
+        return False, "ACP ist deaktiviert; kein Restart ausgefuehrt."
+    if result.status == "external_managed":
+        return False, "ACP wird extern verwaltet; kein lokaler Restart ausgefuehrt."
+    if result.status == "invalid_config":
+        return False, "ACP-Konfiguration ungueltig; Details in Logs oder Health pruefen."
+    if result.status == "failed":
+        return False, "ACP-Neustart fehlgeschlagen; Details in Logs oder Health pruefen."
+    return False, "ACP-Neustart konnte nicht ausgefuehrt werden; Details in Logs oder Health pruefen."
 
 
 async def trigger_acp_restart() -> tuple[bool, str]:
-    """Trigger ACP restart via central lifecycle authority.
-    
-    This function delegates directly to restart_acp() from the ACP lifecycle
-    module, ensuring a single authoritative source for ACP restart logic.
-    The API route is still available for external clients but Telegram
-    bypasses the HTTP layer for efficiency and direct access.
-    
-    Returns:
-        tuple[bool, str]: (success, message) pair for operator feedback.
-    """
+    """Trigger ACP restart via central lifecycle authority."""
     result = restart_acp()
-    
-    # Map LifecycleResult to Telegram-friendly feedback
-    if result.status == "success":
-        return True, result.message
-    
-    if result.status == "disabled":
-        return False, "ACP ist deaktiviert. Bitte ACP_ENABLED=true setzen."
-    
-    if result.status == "external_managed":
-        details = result.details or {}
-        endpoint_status = details.get("endpoint_status", "unknown")
-        if endpoint_status == "reachable":
-            return False, "ACP wird extern verwaltet und ist erreichbar. Kein lokaler Neustart notwendig."
-        else:
-            return False, "ACP wird extern verwaltet, aber Endpoint ist nicht erreichbar. Externer Neustart ggf. erforderlich."
-    
-    if result.status == "invalid_config":
-        return False, "ACP-Konfiguration ist ungültig. Bitte ACP_SETTINGS prüfen."
-    
-    if result.status == "failed":
-        details = result.details or {}
-        error_detail = details.get("error", "Unbekannter Fehler")
-        return False, f"ACP-Neustart fehlgeschlagen: {error_detail}."
-    
-    # Fallback for unknown status
-    return False, f"ACP-Neustart konnte nicht durchgeführt werden: {result.message}"
+    return _render_acp_restart_feedback(result)
 
 
 async def trigger_system_restart_all() -> tuple[bool, str]:
-    """Trigger full system restart including ACP when enabled.
-    
-    Executes system restart (API + Telegram) followed by ACP restart
-    via the central lifecycle authority. Partial failures are reported
-    but do not prevent the overall operation from completing.
-    
-    Returns:
-        tuple[bool, str]: (success, message) pair for operator feedback.
-    """
-    # First, trigger system restart (API + Telegram)
+    """Trigger full system restart including ACP when enabled."""
     success, message = await trigger_system_restart()
     if not success:
         return success, message
 
-    # Then, trigger ACP restart via lifecycle authority (not API)
-    acp_success, acp_message = await trigger_acp_restart()
-    
-    # Aggregate results for operator feedback
+    acp_result = restart_acp()
+    acp_success, acp_message = _render_acp_restart_feedback(acp_result)
+
     if acp_success:
         return True, "Vollstaendiger Neustart (System + ACP) wurde ausgeloest."
-    else:
-        # ACP restart failed or was skipped - report but don't fail overall
-        logger.warning("ACP restart after system restart: %s", acp_message)
-        # Check if this is a skipped scenario (disabled/external_managed)
-        if "deaktiviert" in acp_message.lower() or "extern verwaltet" in acp_message.lower():
-            return True, f"System-Neustart wurde ausgeloest. {acp_message}"
-        else:
-            return True, f"System-Neustart wurde ausgeloest, ACP jedoch nicht: {acp_message}"
+
+    logger.warning(
+        "ACP restart after system restart resulted in status '%s': %s",
+        acp_result.status,
+        acp_message,
+    )
+    if acp_result.status in ACP_RESTART_SKIPPED_STATUSES:
+        return True, f"System-Neustart wurde ausgeloest. {acp_message}"
+    return True, f"System-Neustart wurde ausgeloest, ACP jedoch nicht: {acp_message}"
 
 
 def get_start_message(role: str | None = None, is_active: bool = False) -> str:
@@ -152,13 +122,10 @@ def get_start_message(role: str | None = None, is_active: bool = False) -> str:
         message += f"/{cmd['command']} - {cmd['description']}\n"
 
     if is_active and role == "user":
-        # Regular users only see /help in /start
         message += "/help - Show help and usage information\n"
     elif is_active and role in {"admin", "operator"}:
-        # Operators and admins see /help and /health in /start
         message += "/help - Show help and usage information\n"
         for cmd in get_operator_start_command_list():
-            # Avoid duplicate /help
             if cmd["command"] != "help":
                 message += f"/{cmd['command']} - {cmd['description']}\n"
 
@@ -170,9 +137,8 @@ def get_help_message(role: str | None = None, is_active: bool = False) -> str:
     message = "\U0001F4D6 *ExecQueue Bot Help*\n\n"
 
     if is_active:
-        # All active users can see /status
         message += "/status <ID> - Aufgabestatus abfragen\n"
-        
+
         if role in {"admin", "operator"}:
             message += "/help - Show help and usage information\n"
             message += "/health - Check system health status\n"
@@ -374,14 +340,17 @@ def get_health_command_message() -> str:
 def _read_error_detail(response: httpx.Response) -> str | None:
     """Extract a plain-text API error detail when available."""
     try:
-        detail = response.json().get("detail")
+        payload = response.json()
     except Exception:
         return None
 
-    if isinstance(detail, str):
-        detail = detail.strip()
-        if detail:
-            return detail
+    if isinstance(payload, dict):
+        for key in ("detail", "message"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                value = value.strip()
+                if value:
+                    return value
 
     return None
 

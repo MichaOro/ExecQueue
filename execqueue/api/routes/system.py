@@ -5,10 +5,13 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 
 from execqueue.acp.lifecycle import restart_acp
+from execqueue.api.dependencies import require_system_admin
 from execqueue.api.routes.health import router as health_router
+from execqueue.settings import get_settings, resolve_acp_mode
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +88,37 @@ def _execute_restart_script(
         )
 
 
+def _build_acp_restart_response() -> tuple[int, dict[str, object]]:
+    """Build the ACP restart API response using one stable contract."""
+    result = restart_acp()
+    response: dict[str, object] = {
+        "ok": result.status in {"success", "disabled", "external_managed"},
+        "status": result.status,
+        "message": result.message,
+        "mode": resolve_acp_mode(get_settings()).value,
+    }
+
+    if result.details:
+        response["details"] = result.details
+
+    status_code = (
+        status.HTTP_200_OK
+        if response["ok"]
+        else status.HTTP_500_INTERNAL_SERVER_ERROR
+    )
+    return status_code, response
+
+
 @router.post(
     "/restart",
     summary="Restart all system services (API and Telegram Bot)",
     operation_id="system_restart_post",
     tags=["System"],
+    dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "Restart initiated successfully"},
         403: {"description": "Forbidden - Admin access required"},
+        503: {"description": "Admin token is not configured"},
         500: {"description": "Restart failed"},
     },
 )
@@ -110,9 +136,11 @@ async def system_restart() -> dict[str, object]:
     summary="Restart API service only",
     operation_id="api_restart_post",
     tags=["System"],
+    dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "Restart initiated successfully"},
         403: {"description": "Forbidden - Admin access required"},
+        503: {"description": "Admin token is not configured"},
         500: {"description": "Restart failed"},
     },
 )
@@ -130,9 +158,11 @@ async def api_restart() -> dict[str, object]:
     summary="Restart Telegram Bot service only",
     operation_id="telegram_bot_restart_post",
     tags=["System"],
+    dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "Restart initiated successfully"},
         403: {"description": "Forbidden - Admin access required"},
+        503: {"description": "Admin token is not configured"},
         500: {"description": "Restart failed"},
     },
 )
@@ -150,9 +180,11 @@ async def telegram_bot_restart() -> dict[str, object]:
     summary="Restart ACP service only",
     operation_id="acp_restart_post",
     tags=["System"],
+    dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "ACP restart initiated successfully"},
         403: {"description": "Forbidden - Admin access required"},
+        503: {"description": "Admin token is not configured"},
         500: {"description": "ACP restart failed"},
     },
 )
@@ -168,27 +200,7 @@ async def acp_restart() -> dict[str, object]:
     - message: short, sanitized message for operators
     - details: optional additional details (never includes secrets)
     """
-    result = restart_acp()
-
-    # Build consistent response with all fields
-    response: dict[str, object] = {
-        "ok": True,
-        "status": result.status,
-        "message": result.message,
-    }
-
-    # Always include details if present
-    if result.details:
-        response["details"] = result.details
-
-    # Determine if this is an error condition
-    if result.status in ("success", "disabled", "external_managed"):
-        # These are successful outcomes (even if no action was taken)
-        return response
-    else:
-        # failed or invalid_config - treat as error
-        logger.error("ACP restart failed: %s", result.message)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.message,
-        )
+    status_code, response = _build_acp_restart_response()
+    if not response["ok"]:
+        logger.error("ACP restart failed: %s", response["message"])
+    return JSONResponse(status_code=status_code, content=response)

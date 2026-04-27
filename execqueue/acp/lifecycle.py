@@ -18,7 +18,7 @@ from execqueue.settings import AcpOperatingMode, get_settings, resolve_acp_mode
 logger = logging.getLogger(__name__)
 
 # ACP restart script path
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ACP_RESTART_SCRIPT = PROJECT_ROOT / "ops" / "scripts" / "acp_restart.sh"
 
 
@@ -37,6 +37,17 @@ class LifecycleResult:
     operation: str
     message: str
     details: dict[str, str] | None = None
+
+
+def _failed_restart_result(message: str, *, reason: str, **details: str) -> LifecycleResult:
+    """Create a sanitized failed restart result."""
+    sanitized_details = {"reason": reason, **details}
+    return LifecycleResult(
+        status="failed",
+        operation="restart",
+        message=message,
+        details=sanitized_details,
+    )
 
 
 def restart_acp() -> LifecycleResult:
@@ -109,11 +120,9 @@ def _execute_local_restart() -> LifecycleResult:
         LifecycleResult with the operation outcome.
     """
     if not ACP_RESTART_SCRIPT.exists():
-        return LifecycleResult(
-            status="failed",
-            operation="restart",
-            message="ACP restart script not found.",
-            details={"script_path": str(ACP_RESTART_SCRIPT)},
+        return _failed_restart_result(
+            "ACP restart failed.",
+            reason="script_not_found",
         )
 
     try:
@@ -136,25 +145,21 @@ def _execute_local_restart() -> LifecycleResult:
                 message="ACP restart initiated successfully.",
             )
         else:
-            error_detail = result.stderr.strip() or result.stdout.strip() or "Unknown error"
-            return LifecycleResult(
-                status="failed",
-                operation="restart",
-                message="ACP restart failed.",
-                details={"error": error_detail},
+            return _failed_restart_result(
+                "ACP restart failed.",
+                reason="restart_command_failed",
+                exit_code=str(result.returncode),
             )
 
     except subprocess.TimeoutExpired:
-        return LifecycleResult(
-            status="failed",
-            operation="restart",
-            message="ACP restart timed out.",
+        return _failed_restart_result(
+            "ACP restart timed out.",
+            reason="timeout",
         )
     except Exception as e:
         logger.exception("ACP restart failed with exception")
-        return LifecycleResult(
-            status="failed",
-            operation="restart",
-            message="ACP restart failed.",
-            details={"error": type(e).__name__},
+        return _failed_restart_result(
+            "ACP restart failed.",
+            reason="restart_execution_error",
+            error_type=type(e).__name__,
         )

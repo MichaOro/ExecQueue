@@ -966,12 +966,13 @@ class TestRestartFunctions:
             success, message = await trigger_acp_restart()
 
         assert success is True
-        assert "ACP" in message or "neustart" in message.lower() or "restart" in message.lower()
+        assert "acp-neustart" in message.lower() or "restart" in message.lower()
 
     @pytest.mark.asyncio
     async def test_trigger_system_restart_all(self):
         """Test that trigger_system_restart_all calls both endpoints."""
         from execqueue.workers.telegram.commands import trigger_system_restart_all
+        from execqueue.acp.lifecycle import LifecycleResult
 
         with patch(
             "execqueue.workers.telegram.commands.get_settings"
@@ -990,10 +991,39 @@ class TestRestartFunctions:
                     mock_response
                 )
 
-                success, message = await trigger_system_restart_all()
+                with patch(
+                    "execqueue.workers.telegram.commands.restart_acp"
+                ) as mock_restart:
+                    mock_restart.return_value = LifecycleResult(
+                        status="external_managed",
+                        operation="restart",
+                        message="ACP is externally managed.",
+                    )
+                    success, message = await trigger_system_restart_all()
 
         assert success is True
         msg_lower = message.lower()
         assert "vollstandig" in msg_lower or "vollstaendig" in msg_lower or "restart" in msg_lower or "neustart" in msg_lower
         assert "/status" not in message
         assert "/restart" not in message
+
+    @pytest.mark.asyncio
+    async def test_trigger_acp_restart_hides_internal_failure_details(self):
+        from execqueue.workers.telegram.commands import trigger_acp_restart
+        from execqueue.acp.lifecycle import LifecycleResult
+
+        with patch(
+            "execqueue.workers.telegram.commands.restart_acp"
+        ) as mock_restart:
+            mock_restart.return_value = LifecycleResult(
+                status="failed",
+                operation="restart",
+                message="ACP restart failed.",
+                details={"reason": "restart_command_failed", "exit_code": "1"},
+            )
+            success, message = await trigger_acp_restart()
+
+        assert success is False
+        assert "fehlgeschlagen" in message.lower()
+        assert "exit_code" not in message
+        assert "restart_command_failed" not in message

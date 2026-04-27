@@ -4,6 +4,16 @@ from execqueue.api.router import domain_router, system_router
 from execqueue.main import app, create_app
 
 
+def install_system_admin_token(monkeypatch, token: str = "test-admin-token") -> dict[str, str]:
+    from execqueue.settings import Settings
+
+    monkeypatch.setattr(
+        "execqueue.api.dependencies.get_settings",
+        lambda: Settings(system_admin_token=token),
+    )
+    return {"X-Admin-Token": token}
+
+
 def install_fake_healthchecks(
     monkeypatch,
     *,
@@ -169,6 +179,7 @@ def test_router_structure_separates_system_and_domain_areas():
 def test_system_restart_spawns_detached_process(monkeypatch, tmp_path):
     from execqueue.api.routes import system
 
+    headers = install_system_admin_token(monkeypatch)
     script_path = tmp_path / "global_restart.sh"
     script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
 
@@ -186,7 +197,7 @@ def test_system_restart_spawns_detached_process(monkeypatch, tmp_path):
     monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
 
     client = TestClient(app)
-    response = client.post("/restart")
+    response = client.post("/restart", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["pid"] == 12345
@@ -204,6 +215,7 @@ class TestApiRestartEndpoint:
     def test_api_restart_endpoint_exists(self, monkeypatch, tmp_path):
         from execqueue.api.routes import system
 
+        headers = install_system_admin_token(monkeypatch)
         script_path = tmp_path / "api_restart.sh"
         script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
 
@@ -217,7 +229,7 @@ class TestApiRestartEndpoint:
         monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
 
         client = TestClient(app)
-        response = client.post("/api/restart")
+        response = client.post("/api/restart", headers=headers)
 
         assert response.status_code == 200
         assert response.json()["pid"] == 12346
@@ -226,6 +238,7 @@ class TestApiRestartEndpoint:
     def test_api_restart_spawns_detached_process(self, monkeypatch, tmp_path):
         from execqueue.api.routes import system
 
+        headers = install_system_admin_token(monkeypatch)
         script_path = tmp_path / "api_restart.sh"
         script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
 
@@ -243,7 +256,7 @@ class TestApiRestartEndpoint:
         monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
 
         client = TestClient(app)
-        response = client.post("/api/restart")
+        response = client.post("/api/restart", headers=headers)
 
         assert response.status_code == 200
         assert response.json()["pid"] == 12346
@@ -253,6 +266,8 @@ class TestApiRestartEndpoint:
     def test_api_restart_script_not_found(self, monkeypatch):
         from execqueue.api.routes import system
 
+        headers = install_system_admin_token(monkeypatch)
+
         class FakePath:
             def exists(self):
                 return False
@@ -260,7 +275,7 @@ class TestApiRestartEndpoint:
         monkeypatch.setattr(system, "API_RESTART_SCRIPT", FakePath())
 
         client = TestClient(app)
-        response = client.post("/api/restart")
+        response = client.post("/api/restart", headers=headers)
 
         assert response.status_code == 500
         assert "not found" in response.json()["detail"].lower()
@@ -268,6 +283,7 @@ class TestApiRestartEndpoint:
     def test_api_restart_permission_error(self, monkeypatch, tmp_path):
         from execqueue.api.routes import system
 
+        headers = install_system_admin_token(monkeypatch)
         script_path = tmp_path / "api_restart.sh"
         script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
 
@@ -278,7 +294,7 @@ class TestApiRestartEndpoint:
         monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
 
         client = TestClient(app)
-        response = client.post("/api/restart")
+        response = client.post("/api/restart", headers=headers)
 
         assert response.status_code == 403
         assert "not executable" in response.json()["detail"].lower()
@@ -290,6 +306,7 @@ class TestTelegramBotRestartEndpoint:
     def test_telegram_bot_restart_endpoint_exists(self, monkeypatch, tmp_path):
         from execqueue.api.routes import system
 
+        headers = install_system_admin_token(monkeypatch)
         script_path = tmp_path / "telegram_restart.sh"
         script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
 
@@ -303,7 +320,7 @@ class TestTelegramBotRestartEndpoint:
         monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
 
         client = TestClient(app)
-        response = client.post("/api/telegram_bot/restart")
+        response = client.post("/api/telegram_bot/restart", headers=headers)
 
         assert response.status_code == 200
         assert response.json()["pid"] == 12347
@@ -312,6 +329,7 @@ class TestTelegramBotRestartEndpoint:
     def test_telegram_bot_restart_spawns_detached_process(self, monkeypatch, tmp_path):
         from execqueue.api.routes import system
 
+        headers = install_system_admin_token(monkeypatch)
         script_path = tmp_path / "telegram_restart.sh"
         script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
 
@@ -329,13 +347,15 @@ class TestTelegramBotRestartEndpoint:
         monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
 
         client = TestClient(app)
-        response = client.post("/api/telegram_bot/restart")
+        response = client.post("/api/telegram_bot/restart", headers=headers)
 
         assert response.status_code == 200
         assert popen_calls["kwargs"]["start_new_session"] is True
 
     def test_telegram_bot_restart_script_not_found(self, monkeypatch):
         from execqueue.api.routes import system
+
+        headers = install_system_admin_token(monkeypatch)
 
         class FakePath:
             def exists(self):
@@ -344,9 +364,27 @@ class TestTelegramBotRestartEndpoint:
         monkeypatch.setattr(system, "TELEGRAM_RESTART_SCRIPT", FakePath())
 
         client = TestClient(app)
-        response = client.post("/api/telegram_bot/restart")
+        response = client.post("/api/telegram_bot/restart", headers=headers)
 
         assert response.status_code == 500
+
+
+class TestSystemRestartAuthorization:
+    def test_restart_requires_admin_token(self):
+        client = TestClient(app)
+
+        response = client.post("/restart")
+
+        assert response.status_code in {403, 503}
+
+    def test_restart_rejects_wrong_admin_token(self, monkeypatch):
+        install_system_admin_token(monkeypatch, token="expected-token")
+        client = TestClient(app)
+
+        response = client.post("/restart", headers={"X-Admin-Token": "wrong-token"})
+
+        assert response.status_code == 403
+        assert "admin access required" in response.json()["detail"].lower()
 
 
 class TestDatabaseConnectivityEndpoint:
@@ -481,3 +519,79 @@ class TestHealthEndpointsInOpenAPI:
 
         assert payload["paths"]["/api/health"]["get"]["summary"] == "API component health check"
         assert payload["paths"]["/db/health"]["get"]["summary"] == "Database connectivity check"
+
+
+class TestAcpRestartEndpoint:
+    def test_acp_restart_returns_structured_failure_contract(self, monkeypatch):
+        from execqueue.api.routes import system
+        from execqueue.acp.lifecycle import LifecycleResult
+        from execqueue.settings import Settings
+
+        headers = install_system_admin_token(monkeypatch)
+        monkeypatch.setattr(
+            system,
+            "restart_acp",
+            lambda: LifecycleResult(
+                status="invalid_config",
+                operation="restart",
+                message="ACP configuration is invalid.",
+            ),
+        )
+        monkeypatch.setattr(
+            system,
+            "get_settings",
+            lambda: Settings(
+                system_admin_token="test-admin-token",
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command=None,
+            ),
+        )
+
+        client = TestClient(app)
+        response = client.post("/api/system/acp/restart", headers=headers)
+        payload = response.json()
+
+        assert response.status_code == 500
+        assert payload["ok"] is False
+        assert payload["status"] == "invalid_config"
+        assert payload["message"] == "ACP configuration is invalid."
+        assert payload["mode"] == "invalid_config"
+
+    def test_acp_restart_returns_structured_success_contract(self, monkeypatch):
+        from execqueue.api.routes import system
+        from execqueue.acp.lifecycle import LifecycleResult
+        from execqueue.settings import Settings
+
+        headers = install_system_admin_token(monkeypatch)
+        monkeypatch.setattr(
+            system,
+            "restart_acp",
+            lambda: LifecycleResult(
+                status="external_managed",
+                operation="restart",
+                message="ACP is externally managed.",
+                details={"endpoint_status": "reachable"},
+            ),
+        )
+        monkeypatch.setattr(
+            system,
+            "get_settings",
+            lambda: Settings(
+                system_admin_token="test-admin-token",
+                acp_enabled=True,
+                acp_auto_start=False,
+                acp_endpoint_url="http://127.0.0.1:8010",
+            ),
+        )
+
+        client = TestClient(app)
+        response = client.post("/api/system/acp/restart", headers=headers)
+        payload = response.json()
+
+        assert response.status_code == 200
+        assert payload["ok"] is True
+        assert payload["status"] == "external_managed"
+        assert payload["mode"] == "external_endpoint"
+        assert payload["details"]["endpoint_status"] == "reachable"
