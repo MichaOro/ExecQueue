@@ -35,7 +35,7 @@ def test_task_defaults_are_applied():
         task = Task(
             task_number=1,
             prompt="Build the release notes",
-            type="task",
+            type="planning",
             max_retries=3,
             created_by_type="user",
             created_by_ref="123456789",
@@ -63,7 +63,7 @@ def test_task_created_by_type_constraint_rejects_invalid_values():
             task_number=1,
             title="Invalid creator",
             prompt="This should fail",
-            type="task",
+            type="planning",
             max_retries=1,
             created_by_type="service",
             created_by_ref="internal",

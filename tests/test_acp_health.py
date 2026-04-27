@@ -35,7 +35,13 @@ class TestAcpHealthCheck:
         def mock_settings():
             from execqueue.settings import Settings
 
-            return Settings(acp_enabled=True)
+            # For local_managed_process mode, all required fields must be set
+            return Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command="python -m acp",
+            )
 
         monkeypatch.setattr("execqueue.acp.health.get_settings", mock_settings)
         monkeypatch.setattr(
@@ -62,7 +68,12 @@ class TestAcpHealthCheck:
         def mock_settings():
             from execqueue.settings import Settings
 
-            return Settings(acp_enabled=True)
+            return Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command="python -m acp",
+            )
 
         monkeypatch.setattr("execqueue.acp.health.get_settings", mock_settings)
         monkeypatch.setattr("execqueue.acp.health.ACP_HEALTH_FILE", health_file)
@@ -88,7 +99,12 @@ class TestAcpHealthCheck:
         def mock_settings():
             from execqueue.settings import Settings
 
-            return Settings(acp_enabled=True)
+            return Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command="python -m acp",
+            )
 
         monkeypatch.setattr("execqueue.acp.health.get_settings", mock_settings)
         monkeypatch.setattr("execqueue.acp.health.ACP_HEALTH_FILE", health_file)
@@ -107,7 +123,12 @@ class TestAcpHealthCheck:
         def mock_settings():
             from execqueue.settings import Settings
 
-            return Settings(acp_enabled=True)
+            return Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command="python -m acp",
+            )
 
         monkeypatch.setattr("execqueue.acp.health.get_settings", mock_settings)
         monkeypatch.setattr("execqueue.acp.health.ACP_HEALTH_FILE", health_file)
@@ -132,7 +153,12 @@ class TestAcpHealthCheck:
         def mock_settings():
             from execqueue.settings import Settings
 
-            return Settings(acp_enabled=True)
+            return Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command="python -m acp",
+            )
 
         monkeypatch.setattr("execqueue.acp.health.get_settings", mock_settings)
         monkeypatch.setattr("execqueue.acp.health.ACP_HEALTH_FILE", health_file)
@@ -156,7 +182,12 @@ class TestAcpHealthCheck:
         def mock_settings():
             from execqueue.settings import Settings
 
-            return Settings(acp_enabled=True)
+            return Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command="python -m acp",
+            )
 
         monkeypatch.setattr("execqueue.acp.health.get_settings", mock_settings)
         monkeypatch.setattr("execqueue.acp.health.ACP_HEALTH_FILE", health_file)
@@ -180,7 +211,12 @@ class TestAcpHealthCheck:
         def mock_settings():
             from execqueue.settings import Settings
 
-            return Settings(acp_enabled=True)
+            return Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command="python -m acp",
+            )
 
         monkeypatch.setattr("execqueue.acp.health.get_settings", mock_settings)
         monkeypatch.setattr("execqueue.acp.health.ACP_HEALTH_FILE", health_file)
@@ -204,7 +240,12 @@ class TestAcpHealthCheck:
         def mock_settings():
             from execqueue.settings import Settings
 
-            return Settings(acp_enabled=True)
+            return Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command="python -m acp",
+            )
 
         monkeypatch.setattr("execqueue.acp.health.get_settings", mock_settings)
         monkeypatch.setattr("execqueue.acp.health.ACP_HEALTH_FILE", health_file)

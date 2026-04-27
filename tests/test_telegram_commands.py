@@ -11,9 +11,11 @@ from execqueue.workers.telegram.bot import (
 from execqueue.workers.telegram.commands import (
     CREATE_PROMPT,
     CREATE_TASK_TYPE,
+    CREATE_TITLE,
     create_cancel,
     create_prompt,
     create_start,
+    create_title,
     create_task_type,
     get_health_command_message,
     get_help_message,
@@ -126,7 +128,7 @@ class TestCommandMessages:
     """Tests for command message generation."""
 
     def test_get_start_message_format(self):
-        """Test that start message has correct format."""
+        """Test that start message has correct format for inactive users."""
         message = get_start_message()
 
         assert "👋 Welcome" in message
@@ -134,6 +136,17 @@ class TestCommandMessages:
         assert "/start - Start the bot and show available commands" in message
         assert "/help" not in message
         assert "/health" not in message
+
+    def test_get_start_message_for_active_user_shows_help(self):
+        """Active regular users see /help in /start, but not /health or /status."""
+        message = get_start_message(role="user", is_active=True)
+
+        assert "👋 Welcome" in message
+        assert "/start - Start the bot and show available commands" in message
+        assert "/help - Show help and usage information" in message
+        assert "/status" not in message  # status is only shown in /help
+        assert "/health" not in message  # health is operator/admin only
+        assert "/create" not in message  # create is operator/admin only
 
     def test_get_start_message_for_operator_contains_extra_commands(self):
         """Operators should see extra commands in /start."""
@@ -253,6 +266,8 @@ class TestCreateCommand:
         assert result == CREATE_TASK_TYPE
         update.message.reply_text.assert_called_once()
         assert "Welchen Typ" in update.message.reply_text.call_args[0][0]
+        assert "1 - Planning" in update.message.reply_text.call_args[0][0]
+        assert "4 - Requirement" in update.message.reply_text.call_args[0][0]
         # Should store created_by_ref
         assert context.user_data["created_by_ref"] == "123"
 
@@ -278,7 +293,7 @@ class TestCreateCommand:
 
     @pytest.mark.asyncio
     async def test_create_task_type_selects_task(self):
-        """Test that task type 1 selects 'task'."""
+        """Test that task type 1 selects 'planning'."""
         update = MagicMock()
         update.message = MagicMock()
         update.message.text = "1"
@@ -290,11 +305,11 @@ class TestCreateCommand:
         result = await create_task_type(update, context)
 
         assert result == CREATE_PROMPT
-        assert context.user_data["type"] == "task"
+        assert context.user_data["type"] == "planning"
 
     @pytest.mark.asyncio
     async def test_create_task_type_selects_requirement(self):
-        """Test that task type 2 selects 'requirement'."""
+        """Test that task type 2 now selects 'execution'."""
         update = MagicMock()
         update.message = MagicMock()
         update.message.text = "2"
@@ -306,14 +321,47 @@ class TestCreateCommand:
         result = await create_task_type(update, context)
 
         assert result == CREATE_PROMPT
+        assert context.user_data["type"] == "execution"
+
+    @pytest.mark.asyncio
+    async def test_create_task_type_selects_analysis(self):
+        """Test that task type 3 selects 'analysis'."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "3"
+        update.message.reply_text = AsyncMock()
+
+        context = MagicMock()
+        context.user_data = {}
+
+        result = await create_task_type(update, context)
+
+        assert result == CREATE_PROMPT
+        assert context.user_data["type"] == "analysis"
+
+    @pytest.mark.asyncio
+    async def test_create_task_type_selects_requirement_and_requests_title(self):
+        """Test that task type 4 selects 'requirement' and asks for a title."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "4"
+        update.message.reply_text = AsyncMock()
+
+        context = MagicMock()
+        context.user_data = {}
+
+        result = await create_task_type(update, context)
+
+        assert result == CREATE_TITLE
         assert context.user_data["type"] == "requirement"
+        assert "Requirement-Titel" in update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_create_task_type_rejects_invalid(self):
         """Test that invalid task type shows error."""
         update = MagicMock()
         update.message = MagicMock()
-        update.message.text = "3"
+        update.message.text = "5"
         update.message.reply_text = AsyncMock()
 
         context = MagicMock()
@@ -327,6 +375,38 @@ class TestCreateCommand:
         assert "Ungueltige Auswahl" in update.message.reply_text.call_args[0][0] or "Ungültige Auswahl" in update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
+    async def test_create_title_accepts_requirement_title(self):
+        """Requirement flow should store the title before asking for the prompt."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "  Requirement Title  "
+        update.message.reply_text = AsyncMock()
+
+        context = MagicMock()
+        context.user_data = {"type": "requirement"}
+
+        result = await create_title(update, context)
+
+        assert result == CREATE_PROMPT
+        assert context.user_data["title"] == "Requirement Title"
+
+    @pytest.mark.asyncio
+    async def test_create_title_rejects_empty_value(self):
+        """Requirement flow should reject empty titles."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "   "
+        update.message.reply_text = AsyncMock()
+
+        context = MagicMock()
+        context.user_data = {"type": "requirement"}
+
+        result = await create_title(update, context)
+
+        assert result == CREATE_TITLE
+        assert "nicht leer" in update.message.reply_text.call_args[0][0]
+
+    @pytest.mark.asyncio
     async def test_create_prompt_creates_task(self):
         """Test that /create prompt creates task via API."""
         update = MagicMock()
@@ -336,7 +416,7 @@ class TestCreateCommand:
 
         context = MagicMock()
         context.user_data = {
-            "type": "task",
+            "type": "planning",
             "created_by_ref": "123",
         }
 
@@ -351,9 +431,10 @@ class TestCreateCommand:
 
         # Should call API
         mock_client.create_task.assert_called_once_with(
-            task_type="task",
+            task_type="planning",
             prompt="Test prompt",
             created_by_ref="123",
+            title=None,
         )
         # Should clear user_data
         assert context.user_data == {}
@@ -361,6 +442,36 @@ class TestCreateCommand:
         assert result != CREATE_PROMPT
         last_call = update.message.reply_text.call_args_list[-1]
         assert "Aufgabe #12 wurde erstellt." in last_call[0][0]
+
+    @pytest.mark.asyncio
+    async def test_create_prompt_passes_requirement_title(self):
+        """Requirement flow should forward the captured title to the API client."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "Requirement prompt"
+        update.message.reply_text = AsyncMock()
+
+        context = MagicMock()
+        context.user_data = {
+            "type": "requirement",
+            "title": "REQ-123",
+            "created_by_ref": "123",
+        }
+
+        with patch("execqueue.workers.telegram.commands.api_client") as mock_client:
+            mock_client.create_task = AsyncMock(
+                return_value=(True, "Aufgabe #13 wurde erstellt.")
+            )
+            result = await create_prompt(update, context)
+
+        mock_client.create_task.assert_called_once_with(
+            task_type="requirement",
+            prompt="Requirement prompt",
+            created_by_ref="123",
+            title="REQ-123",
+        )
+        assert context.user_data == {}
+        assert result != CREATE_PROMPT
 
     @pytest.mark.asyncio
     async def test_create_prompt_handles_api_error(self):
@@ -371,7 +482,7 @@ class TestCreateCommand:
         update.message.reply_text = AsyncMock()
 
         context = MagicMock()
-        context.user_data = {"type": "task", "created_by_ref": "123"}
+        context.user_data = {"type": "planning", "created_by_ref": "123"}
 
         # Mock API client to fail
         with patch(
@@ -394,7 +505,7 @@ class TestCreateCommand:
         update.message.reply_text = AsyncMock()
 
         context = MagicMock()
-        context.user_data = {"type": "task", "created_by_ref": "123"}
+        context.user_data = {"type": "planning", "created_by_ref": "123"}
 
         result = await create_prompt(update, context)
 
@@ -411,7 +522,7 @@ class TestCreateCommand:
         update.message.reply_text = AsyncMock()
 
         context = MagicMock()
-        context.user_data = {"type": "task", "created_by_ref": "123"}
+        context.user_data = {"type": "planning", "created_by_ref": "123"}
 
         result = await create_cancel(update, context)
 
@@ -606,7 +717,7 @@ class TestHelpCommandEnhanced:
 
     @pytest.mark.asyncio
     async def test_help_hides_task_commands_for_user(self):
-        """Test that /help hides task commands for regular users."""
+        """Test that /help shows /status but hides /create for regular users."""
         from execqueue.workers.telegram.bot import help_command
 
         update = MagicMock()
@@ -623,9 +734,9 @@ class TestHelpCommandEnhanced:
             await help_command(update, context)
 
         message = update.message.reply_text.call_args[0][0]
-        assert "/create" not in message
-        assert "/restart" not in message
-        assert "/start - Start the bot and show available commands" in message
+        assert "/status" in message  # status is available to all active users
+        assert "/create" not in message  # create is operator/admin only
+        assert "/restart" not in message  # restart is admin only
 
 
 class TestRestartCommand:
@@ -823,11 +934,16 @@ class TestRestartFunctions:
     async def test_trigger_acp_restart_when_disabled(self):
         """Test that trigger_acp_restart returns error when ACP is disabled."""
         from execqueue.workers.telegram.commands import trigger_acp_restart
+        from execqueue.acp.lifecycle import LifecycleResult
 
         with patch(
-            "execqueue.workers.telegram.commands.get_settings"
-        ) as mock_settings:
-            mock_settings.return_value.acp_enabled = False
+            "execqueue.workers.telegram.commands.restart_acp"
+        ) as mock_restart:
+            mock_restart.return_value = LifecycleResult(
+                status="disabled",
+                operation="restart",
+                message="ACP is disabled. No restart performed.",
+            )
             success, message = await trigger_acp_restart()
 
         assert success is False
@@ -835,30 +951,22 @@ class TestRestartFunctions:
 
     @pytest.mark.asyncio
     async def test_trigger_acp_restart_when_enabled(self):
-        """Test that trigger_acp_restart calls ACP API endpoint."""
+        """Test that trigger_acp_restart delegates to restart_acp lifecycle authority."""
         from execqueue.workers.telegram.commands import trigger_acp_restart
+        from execqueue.acp.lifecycle import LifecycleResult
 
         with patch(
-            "execqueue.workers.telegram.commands.get_settings"
-        ) as mock_settings:
-            mock_settings.return_value.acp_enabled = True
-            mock_settings.return_value.execqueue_api_host = "127.0.0.1"
-            mock_settings.return_value.execqueue_api_port = 8000
-
-            with patch(
-                "execqueue.workers.telegram.commands.httpx.AsyncClient"
-            ) as mock_client:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.json.return_value = {"message": "ACP restarted"}
-                mock_client.return_value.__aenter__.return_value.post.return_value = (
-                    mock_response
-                )
-
-                success, message = await trigger_acp_restart()
+            "execqueue.workers.telegram.commands.restart_acp"
+        ) as mock_restart:
+            mock_restart.return_value = LifecycleResult(
+                status="success",
+                operation="restart",
+                message="ACP restart initiated successfully.",
+            )
+            success, message = await trigger_acp_restart()
 
         assert success is True
-        assert "ACP" in message or "restart" in message.lower()
+        assert "ACP" in message or "neustart" in message.lower() or "restart" in message.lower()
 
     @pytest.mark.asyncio
     async def test_trigger_system_restart_all(self):

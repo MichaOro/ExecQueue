@@ -17,6 +17,20 @@ class RuntimeEnvironment(str, Enum):
     PRODUCTION = "production"
 
 
+class AcpOperatingMode(str, Enum):
+    """Deterministic ACP operating mode derived from configuration.
+
+    This is the single authoritative place where the ACP mode is decided.
+    All downstream components (orchestrator, health, API, Telegram) must
+    use ``resolve_acp_mode()`` instead of re-implementing env-var logic.
+    """
+
+    DISABLED = "disabled"
+    EXTERNAL_ENDPOINT = "external_endpoint"
+    LOCAL_MANAGED_PROCESS = "local_managed_process"
+    INVALID_CONFIG = "invalid_config"
+
+
 def validate_database_driver(database_url: str | None, field_name: str) -> str | None:
     """Require explicit SQLAlchemy driver names for PostgreSQL URLs."""
     if database_url is None:
@@ -202,6 +216,44 @@ class Settings(BaseSettings):
                 )
 
         return self
+
+
+def resolve_acp_mode(settings: Settings) -> AcpOperatingMode:
+    """Resolve the ACP operating mode from the given settings.
+
+    This is the **single authoritative function** for determining the ACP
+    operating mode. No other module should re-implement this logic.
+
+    Mode matrix (see also ``.env.example``):
+
+    ======================  =============  =================  ===================  ===================
+    Mode                    ACP_ENABLED    ACP_AUTO_START     ACP_ENDPOINT_URL     ACP_START_COMMAND
+    ======================  =============  =================  ===================  ===================
+    ``disabled``            false          *any*              *any*                *any*
+    ``external_endpoint``   true           false              **required**         *any*
+    ``local_managed...``    true           true               **required**         **required**
+    ``invalid_config``      true           false              missing              *any*
+    ``invalid_config``      true           true               missing              *any*
+    ``invalid_config``      true           true               *any*                missing
+    ======================  =============  =================  ===================  ===================
+
+    Returns:
+        The resolved operating mode.
+    """
+    if not settings.acp_enabled:
+        return AcpOperatingMode.DISABLED
+
+    # ACP is enabled – validate the combination
+    if settings.acp_auto_start:
+        # local_managed_process requires both endpoint_url and start_command
+        if not settings.acp_endpoint_url or not settings.acp_start_command:
+            return AcpOperatingMode.INVALID_CONFIG
+        return AcpOperatingMode.LOCAL_MANAGED_PROCESS
+
+    # external_endpoint requires at least endpoint_url
+    if not settings.acp_endpoint_url:
+        return AcpOperatingMode.INVALID_CONFIG
+    return AcpOperatingMode.EXTERNAL_ENDPOINT
 
 
 @lru_cache

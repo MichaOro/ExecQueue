@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from threading import Event
 
-from execqueue.settings import Settings, get_settings
+from execqueue.settings import AcpOperatingMode, Settings, get_settings, resolve_acp_mode
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,8 @@ class ACPLifecycleManager:
         self._process: subprocess.Popen[bytes] | None = None
         self._last_error: str | None = None
         self._last_exit_code: int | None = None
-        self._state = "disabled" if not settings.acp_enabled else "stopped"
+        mode = resolve_acp_mode(settings)
+        self._state = "disabled" if mode is AcpOperatingMode.DISABLED else "stopped"
 
     def status(self) -> ACPStatus:
         """Return the current ACP runtime status."""
@@ -67,7 +68,8 @@ class ACPLifecycleManager:
         pid: int | None = None
         running = False
 
-        if not self._settings.acp_enabled:
+        mode = resolve_acp_mode(self._settings)
+        if mode is AcpOperatingMode.DISABLED:
             self._state = "disabled"
             return self._snapshot(message="ACP integration is disabled.")
 
@@ -105,9 +107,16 @@ class ACPLifecycleManager:
         command = build_acp_command(self._settings)
         if command is None:
             self._state = "error"
-            self._last_error = (
-                "ACP is enabled but ACP_START_COMMAND is not configured."
-            )
+            mode = resolve_acp_mode(self._settings)
+            if mode is AcpOperatingMode.INVALID_CONFIG:
+                self._last_error = (
+                    "ACP configuration is invalid. "
+                    "Check ACP_ENABLED, ACP_AUTO_START, ACP_ENDPOINT_URL, and ACP_START_COMMAND."
+                )
+            else:
+                self._last_error = (
+                    "ACP is enabled but ACP_START_COMMAND is not configured."
+                )
             logger.error(self._last_error)
             return self._snapshot(message=self._last_error, last_error=self._last_error)
 
@@ -224,6 +233,9 @@ class ACPLifecycleManager:
             return "ACP process is stopping."
         if self._state == "error" and self._last_error:
             return self._last_error
+        mode = resolve_acp_mode(self._settings)
+        if mode is AcpOperatingMode.INVALID_CONFIG:
+            return "ACP configuration is invalid. Check ACP settings."
         if build_acp_command(self._settings) is None:
             return "ACP is enabled but ACP_START_COMMAND is not configured."
         return "ACP process is stopped."
@@ -259,14 +271,25 @@ def build_launch_plan(
 
     configuration_errors: list[str] = []
 
+    # Use central mode resolution instead of raw env checks
+    mode = resolve_acp_mode(settings)
     acp_command: list[str] | None = None
-    if settings.acp_enabled and settings.acp_auto_start:
+    
+    if mode is AcpOperatingMode.LOCAL_MANAGED_PROCESS:
         acp_command = build_acp_command(settings)
         if acp_command is None:
             configuration_errors.append(
                 "ACP auto-start is enabled but ACP_START_COMMAND is not set. "
                 "Skipping ACP startup."
             )
+    elif mode is AcpOperatingMode.INVALID_CONFIG:
+        configuration_errors.append(
+            "ACP configuration is invalid. Check ACP_ENABLED, ACP_AUTO_START, "
+            "ACP_ENDPOINT_URL, and ACP_START_COMMAND."
+        )
+    elif mode is AcpOperatingMode.EXTERNAL_ENDPOINT:
+        logger.info("ACP is configured for external endpoint mode - no local process will be started.")
+    # DISABLED mode: no action needed
 
     bot_command: list[str] | None = None
     if settings.telegram_bot_enabled:

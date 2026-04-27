@@ -87,6 +87,8 @@ def test_project_telegram_user_and_task_migrations_upgrade_and_downgrade(tmp_pat
         "created_by_type",
         "created_by_ref",
         "project_id",
+        "requirement_id",
+        "idempotency_key",
         "details",
         "created_at",
         "updated_at",
@@ -95,22 +97,48 @@ def test_project_telegram_user_and_task_migrations_upgrade_and_downgrade(tmp_pat
     task_unique_constraints = inspector.get_unique_constraints("task")
     task_unique_names = {constraint["name"] for constraint in task_unique_constraints}
     assert "uq_task_task_number" in task_unique_names
+    assert "uq_task_idempotency_key" in task_unique_names
 
     task_foreign_keys = inspector.get_foreign_keys("task")
     foreign_key_names = {foreign_key["name"] for foreign_key in task_foreign_keys}
     assert "fk_task_project_id_project" in foreign_key_names
+    assert "fk_task_requirement_id_requirement" in foreign_key_names
 
     task_indexes = inspector.get_indexes("task")
     task_index_names = {index["name"] for index in task_indexes}
     assert "ix_task_status" in task_index_names
+    assert "ix_task_type" in task_index_names
+    assert "ix_task_requirement_id" in task_index_names
 
     task_checks = inspector.get_check_constraints("task")
     task_check_names = {constraint["name"] for constraint in task_checks}
     assert "ck_task_task_created_by_type_allowed" in task_check_names
 
+    # Verify requirement table exists with correct structure
+    assert "requirement" in inspector.get_table_names()
+    requirement_columns = {column["name"] for column in inspector.get_columns("requirement")}
+    assert requirement_columns == {
+        "id",
+        "title",
+        "description",
+        "status",
+        "project_id",
+        "created_at",
+        "updated_at",
+    }
+
+    requirement_indexes = inspector.get_indexes("requirement")
+    requirement_index_names = {index["name"] for index in requirement_indexes}
+    assert "ix_requirement_status" in requirement_index_names
+    assert "ix_requirement_project_id" in requirement_index_names
+
+    requirement_checks = inspector.get_check_constraints("requirement")
+    requirement_check_names = {constraint["name"] for constraint in requirement_checks}
+    assert "ck_requirement_status_allowed" in requirement_check_names
+
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert version == "20260426_03"
+    assert version == "20260426_04"
 
     command.downgrade(config, "base")
 

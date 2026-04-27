@@ -22,6 +22,7 @@ class TelegramAPIClient:
         task_type: str,
         prompt: str,
         created_by_ref: str,
+        title: str | None = None,
     ) -> tuple[bool, str]:
         """Create a task via the internal API."""
         url = f"{self.base_url}/api/task"
@@ -31,6 +32,11 @@ class TelegramAPIClient:
             "created_by_type": "user",
             "created_by_ref": created_by_ref,
         }
+        if task_type == "requirement":
+            normalized_title = title.strip() if title else ""
+            if not normalized_title:
+                return False, "Requirement-Titel darf nicht leer sein."
+            payload["title"] = normalized_title
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:

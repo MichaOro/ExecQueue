@@ -84,7 +84,7 @@ class TestTelegramBotModule:
 
     @pytest.mark.asyncio
     async def test_start_command_shows_base_message_for_regular_user(self):
-        """Regular users should only see the base /start text."""
+        """Regular users should see /start and /help in /start."""
         from execqueue.workers.telegram.bot import start_command
 
         update = MagicMock()
@@ -100,7 +100,7 @@ class TestTelegramBotModule:
 
         message = update.message.reply_text.call_args[0][0]
         assert "/start - Start the bot and show available commands" in message
-        assert "/help - Show help and usage information" not in message
+        assert "/help - Show help and usage information" in message
         assert "/health - Check system health status" not in message
 
     @pytest.mark.asyncio

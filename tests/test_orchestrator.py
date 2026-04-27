@@ -14,7 +14,7 @@ from execqueue.orchestrator import (
     build_launch_plan,
     monitor_processes,
 )
-from execqueue.settings import Settings
+from execqueue.settings import AcpOperatingMode, Settings, resolve_acp_mode
 
 
 def test_build_launch_plan_starts_api_without_bot_by_default():
@@ -86,10 +86,9 @@ def test_build_launch_plan_skips_acp_when_auto_start_lacks_command():
     plan = build_launch_plan(settings, python_executable="python")
 
     assert plan.acp_command is None
-    assert plan.configuration_errors == (
-        "ACP auto-start is enabled but ACP_START_COMMAND is not set. "
-        "Skipping ACP startup.",
-    )
+    # With the central mode resolution, this is now an invalid_config case
+    assert len(plan.configuration_errors) == 1
+    assert "ACP configuration is invalid" in plan.configuration_errors[0]
 
 
 def test_build_launch_plan_starts_acp_when_enabled_for_auto_start():
@@ -218,3 +217,78 @@ def test_acp_lifecycle_restart_starts_again_after_stop():
     assert status.state == "running"
     assert status.running is True
     assert status.pid == 43
+
+
+class TestAcpModeIntegration:
+    """Tests for ACP mode integration with orchestrator components."""
+
+    def test_build_launch_plan_disabled_mode(self):
+        """Test launch plan when ACP is disabled."""
+        settings = Settings(acp_enabled=False)
+        plan = build_launch_plan(settings, python_executable="python")
+        
+        assert plan.acp_command is None
+        assert plan.configuration_errors == ()
+
+    def test_build_launch_plan_external_endpoint_mode(self):
+        """Test launch plan when ACP is in external endpoint mode."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=False,
+            acp_endpoint_url="https://api.acp.example.com/v1",
+        )
+        plan = build_launch_plan(settings, python_executable="python")
+        
+        assert plan.acp_command is None
+        assert plan.configuration_errors == ()
+
+    def test_build_launch_plan_local_managed_process_mode(self):
+        """Test launch plan when ACP is in local managed process mode."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=True,
+            acp_endpoint_url="http://127.0.0.1:8010",
+            acp_start_command="python -m opencode_acp --port 8010",
+        )
+        plan = build_launch_plan(settings, python_executable="python")
+        
+        assert plan.acp_command == ["python", "-m", "opencode_acp", "--port", "8010"]
+        assert plan.configuration_errors == ()
+
+    def test_build_launch_plan_invalid_config_mode(self):
+        """Test launch plan when ACP configuration is invalid."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=True,
+            acp_endpoint_url="http://127.0.0.1:8010",
+            acp_start_command=None,  # Missing start command
+        )
+        plan = build_launch_plan(settings, python_executable="python")
+        
+        assert plan.acp_command is None
+        assert len(plan.configuration_errors) == 1
+        assert "ACP configuration is invalid" in plan.configuration_errors[0]
+
+    def test_acp_lifecycle_manager_disabled_mode(self):
+        """Test lifecycle manager when ACP is disabled."""
+        manager = ACPLifecycleManager(Settings(acp_enabled=False))
+        status = manager.status()
+        
+        assert status.enabled is False
+        assert status.state == "disabled"
+
+    def test_acp_lifecycle_manager_invalid_config_mode(self):
+        """Test lifecycle manager when ACP configuration is invalid."""
+        manager = ACPLifecycleManager(
+            Settings(
+                acp_enabled=True,
+                acp_auto_start=True,
+                acp_endpoint_url="http://127.0.0.1:8010",
+                acp_start_command=None,
+            )
+        )
+        status = manager.start()
+        
+        # Should return error state with appropriate message
+        assert status.state == "error"
+        assert "invalid" in status.last_error.lower() or "ACP is enabled" in status.last_error

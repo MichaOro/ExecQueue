@@ -13,6 +13,7 @@ from pathlib import Path
 from execqueue.db.session import create_session
 from execqueue.settings import get_settings
 from execqueue.workers.telegram.commands import (
+    create_title,
     create_cancel,
     create_prompt,
     create_start,
@@ -63,7 +64,11 @@ HEALTH_FILE = PROJECT_ROOT / "ops" / "health" / "telegram_bot.json"
 PID_FILE = PROJECT_ROOT / "ops" / "pids" / "telegram_bot.pid"
 
 # Conversation states for /create (imported from commands but re-exported here for registration)
-from execqueue.workers.telegram.commands import CREATE_PROMPT, CREATE_TASK_TYPE
+from execqueue.workers.telegram.commands import (
+    CREATE_PROMPT,
+    CREATE_TASK_TYPE,
+    CREATE_TITLE,
+)
 
 
 def persist_message_user(update: Update) -> None:
@@ -515,6 +520,9 @@ def create_bot_application(token: str, polling_timeout: int) -> Application:
         states={
             CREATE_TASK_TYPE: [
                 MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_task_type)
+            ],
+            CREATE_TITLE: [
+                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_title)
             ],
             CREATE_PROMPT: [
                 MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_prompt)

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic_settings import SettingsConfigDict
 
-from execqueue.settings import RuntimeEnvironment, Settings, get_settings
+from execqueue.settings import AcpOperatingMode, RuntimeEnvironment, Settings, get_settings, resolve_acp_mode
 
 
 class TestSettingsDefaults:
@@ -520,3 +520,109 @@ class TestGetSettings:
 
         assert settings1.telegram_bot_enabled is True
         assert settings2.telegram_bot_enabled is False
+
+
+class TestAcpOperatingModeResolution:
+    """Tests for the ACP operating mode resolution logic."""
+
+    def test_resolve_acp_mode_disabled_when_acp_enabled_false(self):
+        """Test that disabled mode is returned when ACP is disabled."""
+        settings = Settings(acp_enabled=False)
+        assert resolve_acp_mode(settings) is AcpOperatingMode.DISABLED
+
+    def test_resolve_acp_mode_disabled_ignores_other_settings(self):
+        """Test that disabled mode ignores other ACP settings."""
+        settings = Settings(
+            acp_enabled=False,
+            acp_auto_start=True,
+            acp_endpoint_url="https://example.com",
+            acp_start_command="python -m acp",
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.DISABLED
+
+    def test_resolve_acp_mode_external_endpoint_when_enabled_no_autostart_with_endpoint(self):
+        """Test external_endpoint mode: enabled + no autostart + endpoint URL."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=False,
+            acp_endpoint_url="https://api.acp.example.com/v1",
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.EXTERNAL_ENDPOINT
+
+    def test_resolve_acp_mode_external_endpoint_ignores_start_command(self):
+        """Test that external_endpoint mode ignores start command."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=False,
+            acp_endpoint_url="https://api.acp.example.com/v1",
+            acp_start_command="python -m acp",  # Should be ignored
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.EXTERNAL_ENDPOINT
+
+    def test_resolve_acp_mode_local_managed_process_when_all_required(self):
+        """Test local_managed_process mode: enabled + autostart + endpoint + command."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=True,
+            acp_endpoint_url="http://127.0.0.1:8010",
+            acp_start_command="python -m opencode_acp --port 8010",
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.LOCAL_MANAGED_PROCESS
+
+    def test_resolve_acp_mode_invalid_when_enabled_no_autostart_no_endpoint(self):
+        """Test invalid_config: enabled + no autostart + no endpoint URL."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=False,
+            acp_endpoint_url=None,
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.INVALID_CONFIG
+
+    def test_resolve_acp_mode_invalid_when_autostart_no_start_command(self):
+        """Test invalid_config: enabled + autostart + no start command."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=True,
+            acp_endpoint_url="http://127.0.0.1:8010",
+            acp_start_command=None,
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.INVALID_CONFIG
+
+    def test_resolve_acp_mode_invalid_when_autostart_no_endpoint(self):
+        """Test invalid_config: enabled + autostart + no endpoint URL."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=True,
+            acp_endpoint_url=None,
+            acp_start_command="python -m acp",
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.INVALID_CONFIG
+
+    def test_resolve_acp_mode_invalid_when_autostart_no_endpoint_no_command(self):
+        """Test invalid_config: enabled + autostart + no endpoint + no command."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=True,
+            acp_endpoint_url=None,
+            acp_start_command=None,
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.INVALID_CONFIG
+
+    def test_resolve_acp_mode_with_empty_string_endpoint_url(self):
+        """Test that empty string endpoint URL is treated as missing."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=False,
+            acp_endpoint_url="",  # Empty string
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.INVALID_CONFIG
+
+    def test_resolve_acp_mode_with_empty_string_start_command(self):
+        """Test that empty string start command is treated as missing."""
+        settings = Settings(
+            acp_enabled=True,
+            acp_auto_start=True,
+            acp_endpoint_url="http://127.0.0.1:8010",
+            acp_start_command="",  # Empty string
+        )
+        assert resolve_acp_mode(settings) is AcpOperatingMode.INVALID_CONFIG

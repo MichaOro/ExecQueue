@@ -6,12 +6,13 @@ import logging
 
 import httpx
 
+from execqueue.acp.lifecycle import restart_acp
 from execqueue.health.service import (
     get_overall_health,
     render_health_report,
     status_to_emoji,
 )
-from execqueue.settings import get_settings
+from execqueue.settings import AcpOperatingMode, get_settings, resolve_acp_mode
 from execqueue.workers.telegram.api_client import api_client
 from execqueue.workers.telegram.auth import get_user_info
 
@@ -30,7 +31,8 @@ except ImportError:
 
 
 CREATE_TASK_TYPE = 1
-CREATE_PROMPT = 2
+CREATE_TITLE = 2
+CREATE_PROMPT = 3
 
 
 def get_command_list() -> list[dict[str, str]]:
@@ -70,48 +72,74 @@ async def trigger_system_restart() -> tuple[bool, str]:
 
 
 async def trigger_acp_restart() -> tuple[bool, str]:
-    """Trigger ACP restart via API."""
-    settings = get_settings()
-    if not settings.acp_enabled:
+    """Trigger ACP restart via central lifecycle authority.
+    
+    This function delegates directly to restart_acp() from the ACP lifecycle
+    module, ensuring a single authoritative source for ACP restart logic.
+    The API route is still available for external clients but Telegram
+    bypasses the HTTP layer for efficiency and direct access.
+    
+    Returns:
+        tuple[bool, str]: (success, message) pair for operator feedback.
+    """
+    result = restart_acp()
+    
+    # Map LifecycleResult to Telegram-friendly feedback
+    if result.status == "success":
+        return True, result.message
+    
+    if result.status == "disabled":
         return False, "ACP ist deaktiviert. Bitte ACP_ENABLED=true setzen."
-
-    url = (
-        f"http://{settings.execqueue_api_host}:{settings.execqueue_api_port}"
-        "/api/system/acp/restart"
-    )
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(url)
-
-        if response.status_code == 200:
-            data = response.json()
-            return True, data.get("message", "ACP restart initiated successfully.")
-
-        error_msg = _read_error_detail(response) or "Unknown error"
-        return False, f"ACP restart failed: {error_msg}"
-    except httpx.TimeoutException:
-        return False, "ACP restart request timed out."
-    except Exception as exc:
-        return False, f"ACP restart failed: {exc}"
+    
+    if result.status == "external_managed":
+        details = result.details or {}
+        endpoint_status = details.get("endpoint_status", "unknown")
+        if endpoint_status == "reachable":
+            return False, "ACP wird extern verwaltet und ist erreichbar. Kein lokaler Neustart notwendig."
+        else:
+            return False, "ACP wird extern verwaltet, aber Endpoint ist nicht erreichbar. Externer Neustart ggf. erforderlich."
+    
+    if result.status == "invalid_config":
+        return False, "ACP-Konfiguration ist ungültig. Bitte ACP_SETTINGS prüfen."
+    
+    if result.status == "failed":
+        details = result.details or {}
+        error_detail = details.get("error", "Unbekannter Fehler")
+        return False, f"ACP-Neustart fehlgeschlagen: {error_detail}."
+    
+    # Fallback for unknown status
+    return False, f"ACP-Neustart konnte nicht durchgeführt werden: {result.message}"
 
 
 async def trigger_system_restart_all() -> tuple[bool, str]:
-    """Trigger full system restart including ACP when enabled."""
+    """Trigger full system restart including ACP when enabled.
+    
+    Executes system restart (API + Telegram) followed by ACP restart
+    via the central lifecycle authority. Partial failures are reported
+    but do not prevent the overall operation from completing.
+    
+    Returns:
+        tuple[bool, str]: (success, message) pair for operator feedback.
+    """
+    # First, trigger system restart (API + Telegram)
     success, message = await trigger_system_restart()
     if not success:
         return success, message
 
-    settings = get_settings()
-    if not settings.acp_enabled:
-        return True, "Vollständiger Neustart (System + ACP) wurde ausgelöst."
-
+    # Then, trigger ACP restart via lifecycle authority (not API)
     acp_success, acp_message = await trigger_acp_restart()
-    if not acp_success:
-        logger.warning("ACP restart failed after system restart: %s", acp_message)
-        return True, "System-Neustart wurde ausgelöst, ACP jedoch nicht."
-
-    return True, "Vollständiger Neustart (System + ACP) wurde ausgelöst."
+    
+    # Aggregate results for operator feedback
+    if acp_success:
+        return True, "Vollstaendiger Neustart (System + ACP) wurde ausgeloest."
+    else:
+        # ACP restart failed or was skipped - report but don't fail overall
+        logger.warning("ACP restart after system restart: %s", acp_message)
+        # Check if this is a skipped scenario (disabled/external_managed)
+        if "deaktiviert" in acp_message.lower() or "extern verwaltet" in acp_message.lower():
+            return True, f"System-Neustart wurde ausgeloest. {acp_message}"
+        else:
+            return True, f"System-Neustart wurde ausgeloest, ACP jedoch nicht: {acp_message}"
 
 
 def get_start_message(role: str | None = None, is_active: bool = False) -> str:
@@ -123,9 +151,16 @@ def get_start_message(role: str | None = None, is_active: bool = False) -> str:
     for cmd in commands:
         message += f"/{cmd['command']} - {cmd['description']}\n"
 
-    if is_active and role in {"admin", "operator"}:
+    if is_active and role == "user":
+        # Regular users only see /help in /start
+        message += "/help - Show help and usage information\n"
+    elif is_active and role in {"admin", "operator"}:
+        # Operators and admins see /help and /health in /start
+        message += "/help - Show help and usage information\n"
         for cmd in get_operator_start_command_list():
-            message += f"/{cmd['command']} - {cmd['description']}\n"
+            # Avoid duplicate /help
+            if cmd["command"] != "help":
+                message += f"/{cmd['command']} - {cmd['description']}\n"
 
     return message
 
@@ -134,16 +169,19 @@ def get_help_message(role: str | None = None, is_active: bool = False) -> str:
     """Generate the role-based help message."""
     message = "\U0001F4D6 *ExecQueue Bot Help*\n\n"
 
-    if is_active and role in {"admin", "operator"}:
-        message += "/help - Show help and usage information\n"
-        message += "/health - Check system health status\n"
-        message += "\n\U0001F4DD Aufgaben:\n"
-        message += "/create - Neue Aufgabe erstellen\n"
+    if is_active:
+        # All active users can see /status
         message += "/status <ID> - Aufgabestatus abfragen\n"
+        
+        if role in {"admin", "operator"}:
+            message += "/help - Show help and usage information\n"
+            message += "/health - Check system health status\n"
+            message += "\n\U0001F4DD Aufgaben:\n"
+            message += "/create - Neue Aufgabe erstellen\n"
 
-        if role == "admin":
-            message += "\n\u2699\ufe0f Administration:\n"
-            message += "/restart - System neu starten\n"
+            if role == "admin":
+                message += "\n\u2699\ufe0f Administration:\n"
+                message += "/restart - System neu starten\n"
     else:
         message += "/start - Start the bot and show available commands\n"
 
@@ -160,26 +198,28 @@ async def create_start(
     role, is_active = get_user_info(update.effective_user.id)
     if not is_active:
         await update.message.reply_text(
-            "❌ Ihr Konto ist nicht aktiv. Bitte kontaktieren Sie einen Administrator."
+            "\u274C Ihr Konto ist nicht aktiv. Bitte kontaktieren Sie einen Administrator."
         )
         return _conversation_end()
 
     if role not in ["admin", "operator"]:
         await update.message.reply_text(
-            "❌ Zugriff verweigert. Dieser Befehl ist nur fuer Administratoren und Operatoren verfuegbar."
+            "\u274C Zugriff verweigert. Dieser Befehl ist nur fuer Administratoren und Operatoren verfuegbar."
         )
         return _conversation_end()
 
     if context is not None:
         context.user_data["created_by_ref"] = str(update.effective_user.id)
 
-    await update.message.reply_text(
-        "📝 *Aufgabe erstellen*\n\n"
+    create_message = (
+        "\U0001F4DD *Aufgabe erstellen*\n\n"
         "Welchen Typ moechten Sie erstellen?\n\n"
-        "1 - Task\n"
-        "2 - Requirement",
-        parse_mode="Markdown",
+        "1 - Planning\n"
+        "2 - Execution\n"
+        "3 - Analysis\n"
+        "4 - Requirement"
     )
+    await update.message.reply_text(create_message, parse_mode="Markdown")
     return CREATE_TASK_TYPE
 
 
@@ -192,14 +232,43 @@ async def create_task_type(
 
     text = update.message.text.strip()
     if text == "1":
-        context.user_data["type"] = "task"
+        context.user_data["type"] = "planning"
     elif text == "2":
+        context.user_data["type"] = "execution"
+    elif text == "3":
+        context.user_data["type"] = "analysis"
+    elif text == "4":
         context.user_data["type"] = "requirement"
+        await update.message.reply_text(
+            "\U0001F4DD Bitte geben Sie den Requirement-Titel ein:"
+        )
+        return CREATE_TITLE
     else:
-        await update.message.reply_text("❌ Ungültige Auswahl. Bitte 1 oder 2 eingeben.")
+        await update.message.reply_text(
+            "\u274C Ungueltige Auswahl. Bitte 1, 2, 3 oder 4 eingeben."
+        )
         return CREATE_TASK_TYPE
 
-    await update.message.reply_text("📝 Bitte geben Sie den Prompt/Inhalt ein:")
+    await update.message.reply_text("\U0001F4DD Bitte geben Sie den Prompt/Inhalt ein:")
+    return CREATE_PROMPT
+
+
+async def create_title(
+    update: "Update | None", context: "CallbackContext | None"
+) -> int:
+    """Collect the requirement title before asking for the prompt."""
+    if not update or not update.message or context is None:
+        return _conversation_end()
+
+    title = update.message.text.strip()
+    if not title:
+        await update.message.reply_text(
+            "\u274C Requirement-Titel darf nicht leer sein."
+        )
+        return CREATE_TITLE
+
+    context.user_data["title"] = title
+    await update.message.reply_text("\U0001F4DD Bitte geben Sie den Prompt/Inhalt ein:")
     return CREATE_PROMPT
 
 
@@ -212,21 +281,22 @@ async def create_prompt(
 
     prompt = update.message.text.strip()
     if not prompt:
-        await update.message.reply_text("❌ Inhalt darf nicht leer sein.")
+        await update.message.reply_text("\u274C Inhalt darf nicht leer sein.")
         return CREATE_PROMPT
 
-    await update.message.reply_text("⏳ Erstelle Aufgabe...")
+    await update.message.reply_text("\u23F3 Erstelle Aufgabe...")
 
     success, message = await api_client.create_task(
-        task_type=context.user_data.get("type", "task"),
+        task_type=context.user_data.get("type", "planning"),
         prompt=prompt,
         created_by_ref=context.user_data.get("created_by_ref", ""),
+        title=context.user_data.get("title"),
     )
 
     if success:
-        await update.message.reply_text(f"✅ {message}")
+        await update.message.reply_text(f"\u2705 {message}")
     else:
-        await update.message.reply_text(f"❌ {message}")
+        await update.message.reply_text(f"\u274C {message}")
 
     context.user_data.clear()
     return _conversation_end()
@@ -239,7 +309,7 @@ async def create_cancel(
     if context is not None:
         context.user_data.clear()
     if update and update.message:
-        await update.message.reply_text("❌ Erstellung abgebrochen.")
+        await update.message.reply_text("\u274C Erstellung abgebrochen.")
     return _conversation_end()
 
 
@@ -253,34 +323,34 @@ async def status_command(
     _, is_active = get_user_info(update.effective_user.id)
     if not is_active:
         await update.message.reply_text(
-            "❌ Ihr Konto ist nicht aktiv. Bitte kontaktieren Sie einen Administrator."
+            "\u274C Ihr Konto ist nicht aktiv. Bitte kontaktieren Sie einen Administrator."
         )
         return
 
     if len(context.args) != 1:
         await update.message.reply_text(
-            "❌ Ungültige Verwendung: /status <Aufgabennummer>\n\nBeispiel: /status 123"
+            "\u274C Ungueltige Verwendung: /status <Aufgabennummer>\n\nBeispiel: /status 123"
         )
         return
 
     try:
         task_number = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("❌ Aufgabennummer muss eine Zahl sein.")
+        await update.message.reply_text("\u274C Aufgabennummer muss eine Zahl sein.")
         return
 
-    await update.message.reply_text("⏳ Lade Status...")
+    await update.message.reply_text("\u23F3 Lade Status...")
 
     success, result = await api_client.get_task_status(task_number)
     if success:
         status_text = result.get("status", "unknown")
         await update.message.reply_text(
-            f"📊 *Status fuer Aufgabe #{task_number}*\n\nStatus: {status_text}",
+            f"\U0001F4CA *Status fuer Aufgabe #{task_number}*\n\nStatus: {status_text}",
             parse_mode="Markdown",
         )
         return
 
-    await update.message.reply_text(f"❌ {result}")
+    await update.message.reply_text(f"\u274C {result}")
 
 
 def _get_status_emoji(status: str) -> str:

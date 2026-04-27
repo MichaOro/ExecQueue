@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from datetime import datetime
 from enum import Enum
 from uuid import UUID, uuid4
@@ -41,6 +42,27 @@ class TaskCreatedByType(str, Enum):
 
     USER = "user"
     AGENT = "agent"
+
+
+class TaskType(str, Enum):
+    """Supported executable task types.
+
+    Note: 'requirement' is an intake type but NOT an executable task type.
+    Requirements are mapped to 'planning' tasks during intake validation.
+    """
+
+    PLANNING = "planning"
+    EXECUTION = "execution"
+    ANALYSIS = "analysis"
+
+
+class RequirementStatus(str, Enum):
+    """Supported requirement lifecycle states."""
+
+    DRAFT = "draft"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    ARCHIVED = "archived"
 
 
 class TaskStatus(str, Enum):
@@ -127,6 +149,48 @@ class TelegramUser(Base):
     )
 
 
+class Requirement(Base):
+    """Persisted requirement record for intake artifacts.
+
+    Requirements represent the initial intake artifact that may trigger
+    one or more planning/execution/analysis tasks.
+    """
+
+    __tablename__ = "requirement"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'rejected', 'archived')",
+            name="ck_requirement_status_allowed",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=RequirementStatus.DRAFT.value,
+        server_default=RequirementStatus.DRAFT.value,
+    )
+    project_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("project.id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class Task(Base):
     """Persisted task record used by the API and Telegram integration."""
 
@@ -134,7 +198,11 @@ class Task(Base):
     __table_args__ = (
         CheckConstraint(
             "created_by_type IN ('user', 'agent')",
-            name="task_created_by_type_allowed",
+            name="ck_task_created_by_type_allowed",
+        ),
+        CheckConstraint(
+            "type IN ('planning', 'execution', 'analysis')",
+            name="ck_task_type_allowed",
         ),
     )
 
@@ -152,7 +220,10 @@ class Task(Base):
         server_default="",
     )
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
@@ -175,7 +246,17 @@ class Task(Base):
         ForeignKey("project.id"),
         nullable=True,
     )
-    details: Mapped[dict[str, object]] = mapped_column(
+    requirement_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("requirement.id"),
+        nullable=True,
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        unique=True,
+    )
+    details: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
         default=dict,
