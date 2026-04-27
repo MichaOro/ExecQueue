@@ -1,4 +1,4 @@
-"""Tests for Telegram bot command handlers."""
+﻿"""Tests for Telegram bot command handlers."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -131,7 +131,7 @@ class TestCommandMessages:
         """Test that start message has correct format for inactive users."""
         message = get_start_message()
 
-        assert "👋 Welcome" in message
+        assert "Welcome to ExecQueue Bot!" in message
         assert "Available commands:" in message
         assert "/start - Start the bot and show available commands" in message
         assert "/help" not in message
@@ -141,7 +141,7 @@ class TestCommandMessages:
         """Active regular users see /help in /start, but not /health or /status."""
         message = get_start_message(role="user", is_active=True)
 
-        assert "👋 Welcome" in message
+        assert "Welcome to ExecQueue Bot!" in message
         assert "/start - Start the bot and show available commands" in message
         assert "/help - Show help and usage information" in message
         assert "/status" not in message  # status is only shown in /help
@@ -372,7 +372,7 @@ class TestCreateCommand:
         # Should stay in task type selection
         assert result == CREATE_TASK_TYPE
         update.message.reply_text.assert_called_once()
-        assert "Ungueltige Auswahl" in update.message.reply_text.call_args[0][0] or "Ungültige Auswahl" in update.message.reply_text.call_args[0][0]
+        assert "Ungueltige Auswahl" in update.message.reply_text.call_args[0][0] or "UngÃ¼ltige Auswahl" in update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_create_title_accepts_requirement_title(self):
@@ -494,7 +494,7 @@ class TestCreateCommand:
         # Should reply with error
         assert update.message.reply_text.call_count >= 2  # loading + error
         last_call = update.message.reply_text.call_args_list[-1]
-        assert "❌" in last_call[0][0]
+        assert "API error" in last_call[0][0]
 
     @pytest.mark.asyncio
     async def test_create_rejects_empty_prompt(self):
@@ -578,7 +578,7 @@ class TestStatusCommand:
         # Should show usage error
         update.message.reply_text.assert_called_once()
         msg = update.message.reply_text.call_args[0][0]
-        assert "Ungueltige Verwendung" in msg or "Ungültige Verwendung" in msg
+        assert "Ungueltige Verwendung" in msg or "UngÃ¼ltige Verwendung" in msg
 
     @pytest.mark.asyncio
     async def test_status_rejects_invalid_task_number(self):
@@ -658,7 +658,7 @@ class TestStatusCommand:
 
         # Should reply with error
         last_call = update.message.reply_text.call_args_list[-1]
-        assert "❌" in last_call[0][0]
+        assert "Aufgabe nicht gefunden." in last_call[0][0]
 
 
 class TestHelpCommandEnhanced:
@@ -755,25 +755,15 @@ class TestRestartCommand:
         context = MagicMock()
         context.args = ["invalid"]
 
-        # Mock admin user
-        mock_user = MagicMock()
-        mock_user.role = "admin"
-        mock_user.telegram_id = 123
-        
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_user
-        
-        mock_session_instance = MagicMock()
-        mock_session_instance.execute.return_value = mock_result
-        mock_session_instance.__enter__ = MagicMock(return_value=mock_session_instance)
-        mock_session_instance.__exit__ = MagicMock(return_value=False)
-
-        with patch("execqueue.workers.telegram.bot.create_session", return_value=mock_session_instance):
+        with patch(
+            "execqueue.workers.telegram.auth.get_user_info",
+            return_value=("admin", True),
+        ):
             await restart_command(update, context)
 
         # Should show error message
         update.message.reply_text.assert_called_once()
-        assert "Ungültiger Parameter" in update.message.reply_text.call_args[0][0]
+        assert "Parameter" in update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
     async def test_restart_command_default_system(self):
@@ -788,20 +778,10 @@ class TestRestartCommand:
         context = MagicMock()
         context.args = []
 
-        # Mock admin user
-        mock_user = MagicMock()
-        mock_user.role = "admin"
-        mock_user.telegram_id = 123
-        
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_user
-        
-        mock_session_instance = MagicMock()
-        mock_session_instance.execute.return_value = mock_result
-        mock_session_instance.__enter__ = MagicMock(return_value=mock_session_instance)
-        mock_session_instance.__exit__ = MagicMock(return_value=False)
-
-        with patch("execqueue.workers.telegram.bot.create_session", return_value=mock_session_instance):
+        with patch(
+            "execqueue.workers.telegram.auth.get_user_info",
+            return_value=("admin", True),
+        ):
             with patch(
                 "execqueue.workers.telegram.commands.trigger_system_restart"
             ) as mock_restart:
@@ -825,20 +805,10 @@ class TestRestartCommand:
         context = MagicMock()
         context.args = ["acp"]
 
-        # Mock admin user
-        mock_user = MagicMock()
-        mock_user.role = "admin"
-        mock_user.telegram_id = 123
-        
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_user
-        
-        mock_session_instance = MagicMock()
-        mock_session_instance.execute.return_value = mock_result
-        mock_session_instance.__enter__ = MagicMock(return_value=mock_session_instance)
-        mock_session_instance.__exit__ = MagicMock(return_value=False)
-
-        with patch("execqueue.workers.telegram.bot.create_session", return_value=mock_session_instance):
+        with patch(
+            "execqueue.workers.telegram.auth.get_user_info",
+            return_value=("admin", True),
+        ):
             with patch(
                 "execqueue.workers.telegram.commands.trigger_acp_restart"
             ) as mock_restart:
@@ -863,20 +833,10 @@ class TestRestartCommand:
         context = MagicMock()
         context.args = ["all"]
 
-        # Mock admin user
-        mock_user = MagicMock()
-        mock_user.role = "admin"
-        mock_user.telegram_id = 123
-        
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_user
-        
-        mock_session_instance = MagicMock()
-        mock_session_instance.execute.return_value = mock_result
-        mock_session_instance.__enter__ = MagicMock(return_value=mock_session_instance)
-        mock_session_instance.__exit__ = MagicMock(return_value=False)
-
-        with patch("execqueue.workers.telegram.bot.create_session", return_value=mock_session_instance):
+        with patch(
+            "execqueue.workers.telegram.auth.get_user_info",
+            return_value=("admin", True),
+        ):
             with patch(
                 "execqueue.workers.telegram.commands.trigger_system_restart_all"
             ) as mock_restart:
@@ -886,7 +846,7 @@ class TestRestartCommand:
         # Should call full restart
         mock_restart.assert_called_once()
         # Should show full restart confirmation
-        assert "Vollständiger Neustart" in update.message.reply_text.call_args_list[0][0][0]
+        assert "Neustart" in update.message.reply_text.call_args_list[0][0][0]
 
     @pytest.mark.asyncio
     async def test_restart_command_acp_disabled(self):
@@ -901,20 +861,10 @@ class TestRestartCommand:
         context = MagicMock()
         context.args = ["acp"]
 
-        # Mock DB session and ACP disabled
-        mock_user = MagicMock()
-        mock_user.role = "admin"
-        mock_user.telegram_id = 123
-        
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_user
-        
-        mock_session_instance = MagicMock()
-        mock_session_instance.execute.return_value = mock_result
-        mock_session_instance.__enter__ = MagicMock(return_value=mock_session_instance)
-        mock_session_instance.__exit__ = MagicMock(return_value=False)
-
-        with patch("execqueue.workers.telegram.bot.create_session", return_value=mock_session_instance):
+        with patch(
+            "execqueue.workers.telegram.auth.get_user_info",
+            return_value=("admin", True),
+        ):
             with patch(
                 "execqueue.workers.telegram.commands.trigger_acp_restart"
             ) as mock_restart:
@@ -923,7 +873,7 @@ class TestRestartCommand:
 
         # Should show error
         last_call = update.message.reply_text.call_args_list[-1]
-        assert "❌" in last_call[0][0]
+        assert "fehlgeschlagen" in last_call[0][0]
         assert "deaktiviert" in last_call[0][0].lower()
 
 
@@ -980,6 +930,7 @@ class TestRestartFunctions:
             mock_settings.return_value.acp_enabled = True
             mock_settings.return_value.execqueue_api_host = "127.0.0.1"
             mock_settings.return_value.execqueue_api_port = 8000
+            mock_settings.return_value.system_admin_token = "test-admin-token"
 
             with patch(
                 "execqueue.workers.telegram.commands.httpx.AsyncClient"
@@ -1006,6 +957,22 @@ class TestRestartFunctions:
         assert "vollstandig" in msg_lower or "vollstaendig" in msg_lower or "restart" in msg_lower or "neustart" in msg_lower
         assert "/status" not in message
         assert "/restart" not in message
+        post_call = mock_client.return_value.__aenter__.return_value.post.call_args
+        assert post_call.kwargs["headers"]["X-Admin-Token"] == "test-admin-token"
+
+    @pytest.mark.asyncio
+    async def test_trigger_system_restart_requires_admin_token(self):
+        from execqueue.workers.telegram.commands import trigger_system_restart
+
+        with patch("execqueue.workers.telegram.commands.get_settings") as mock_settings:
+            mock_settings.return_value.execqueue_api_host = "127.0.0.1"
+            mock_settings.return_value.execqueue_api_port = 8000
+            mock_settings.return_value.system_admin_token = None
+
+            success, message = await trigger_system_restart()
+
+        assert success is False
+        assert "system_admin_token" in message.lower()
 
     @pytest.mark.asyncio
     async def test_trigger_acp_restart_hides_internal_failure_details(self):

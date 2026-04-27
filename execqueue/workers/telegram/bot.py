@@ -1,4 +1,4 @@
-"""Telegram bot self-health reporting."""
+﻿"""Telegram bot self-health reporting."""
 
 import asyncio
 import inspect
@@ -12,12 +12,13 @@ from pathlib import Path
 
 from execqueue.db.session import create_session
 from execqueue.settings import get_settings
+from execqueue.workers.telegram import auth as telegram_auth
 from execqueue.workers.telegram.commands import (
-    create_title,
     create_cancel,
     create_prompt,
     create_start,
     create_task_type,
+    create_title,
     get_health_command_message,
     get_help_message,
     get_start_message,
@@ -239,9 +240,7 @@ async def start_command(update: Update, context: "ContextTypes.DEFAULT_TYPE | No
 
     if telegram_user_id:
         try:
-            from execqueue.workers.telegram.auth import get_user_info
-
-            role, is_active = get_user_info(telegram_user_id)
+            role, is_active = telegram_auth.get_user_info(telegram_user_id)
         except Exception:
             logger.exception("Failed to check user role for start command")
 
@@ -263,9 +262,7 @@ async def help_command(update: Update, context: "ContextTypes.DEFAULT_TYPE | Non
 
     if telegram_user_id:
         try:
-            from execqueue.workers.telegram.auth import get_user_info
-
-            role, is_active = get_user_info(telegram_user_id)
+            role, is_active = telegram_auth.get_user_info(telegram_user_id)
         except Exception:
             logger.exception("Failed to check user role for help command")
 
@@ -273,35 +270,6 @@ async def help_command(update: Update, context: "ContextTypes.DEFAULT_TYPE | Non
         get_help_message(role=role, is_active=is_active),
         parse_mode="Markdown",
     )
-    return
-
-    # Build help message with role-based commands
-    help_message = "📖 *ExecQueue Bot Help*\n\n"
-
-    if is_active:
-        help_message += "Verfügbare Befehle:\n\n"
-        help_message += "/start - Bot starten\n"
-        help_message += "/health - Systemstatus prüfen\n"
-
-        # Task commands for admin/operator
-        if role in ["admin", "operator"]:
-            help_message += "\n📝 Aufgaben:\n"
-            help_message += "/create - Neue Aufgabe erstellen\n"
-            help_message += "/status <ID> - Aufgabestatus abfragen\n"
-
-        # Admin-only commands
-        if role == "admin":
-            help_message += "\n⚙️ Administration:\n"
-            help_message += "/restart - System neu starten\n"
-    else:
-        help_message += "Zusätzliche Befehle:\n"
-        help_message += "/start - Bot neu starten\n"
-        help_message += "/health - Systemstatus prüfen\n"
-        help_message += "\n(Keine zusätzlichen Befehle für deine Rolle)"
-
-    help_message += "\n\nFür weitere Informationen besuchen Sie die Dokumentation."
-
-    await update.message.reply_text(help_message, parse_mode="Markdown")
 
 
 async def health_command(
@@ -331,20 +299,14 @@ async def restart_command(
 
     if telegram_user_id:
         try:
-            from execqueue.db.models import TelegramUser
-            from sqlalchemy import select
-
-            with create_session() as session:
-                user = session.execute(
-                    select(TelegramUser).where(TelegramUser.telegram_id == telegram_user_id)
-                ).scalar_one_or_none()
-                is_admin = user is not None and user.role == "admin" and user.is_active
+            role, is_active = telegram_auth.get_user_info(telegram_user_id)
+            is_admin = is_active and role == "admin"
         except Exception:
             logger.exception("Failed to check user role for restart command")
 
     if not is_admin:
         await update.message.reply_text(
-            "❌ Zugriff verweigert. Dieser Befehl ist nur für Administratoren verfügbar."
+            "Zugriff verweigert. Dieser Befehl ist nur fuer Administratoren verfuegbar."
         )
         return
 
@@ -356,8 +318,8 @@ async def restart_command(
             restart_type = arg
         else:
             await update.message.reply_text(
-                "❌ *Ungültiger Parameter*\n\n"
-                "Verfügbare Optionen:\n"
+                "*Ungueltiger Parameter*\n\n"
+                "Verfuegbare Optionen:\n"
                 "/restart - System neu starten (API + Bot)\n"
                 "/restart acp - ACP neu starten\n"
                 "/restart all - Alle Komponenten neu starten",
@@ -368,19 +330,19 @@ async def restart_command(
     # Send confirmation based on restart type
     if restart_type == "acp":
         await update.message.reply_text(
-            "🔄 *ACP-Neustart wird vorbereitet...*\n\n"
+            "*ACP-Neustart wird vorbereitet...*\n\n"
             "Sende Anfrage an API. Dies kann einen Moment dauern.",
             parse_mode="Markdown"
         )
     elif restart_type == "all":
         await update.message.reply_text(
-            "🔄 *Vollständiger Neustart wird vorbereitet...*\n\n"
+            "*Vollstaendiger Neustart wird vorbereitet...*\n\n"
             "Sende Anfrage an API. Dies kann einen Moment dauern.",
             parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(
-            "🔄 *System-Neustart wird vorbereitet...*\n\n"
+            "*System-Neustart wird vorbereitet...*\n\n"
             "Sende Anfrage an API. Dies kann einen Moment dauern.",
             parse_mode="Markdown"
         )
@@ -402,18 +364,18 @@ async def restart_command(
         
         if success:
             await update.message.reply_text(
-                f"✅ *Neustart erfolgreich ausgelöst*\n\n{message}",
+                f"*Neustart erfolgreich ausgeloest*\n\n{message}",
                 parse_mode="Markdown"
             )
         else:
             await update.message.reply_text(
-                f"❌ *Neustart fehlgeschlagen*\n\n{message}",
+                f"*Neustart fehlgeschlagen*\n\n{message}",
                 parse_mode="Markdown"
             )
     except Exception:
         logger.exception("Error during restart command")
         await update.message.reply_text(
-            "❌ *Fehler beim Neustart*\n\nEin unerwarteter Fehler ist aufgetreten. Bitte Logs oder Health pruefen.",
+            "*Fehler beim Neustart*\n\nEin unerwarteter Fehler ist aufgetreten. Bitte Logs oder Health pruefen.",
             parse_mode="Markdown"
         )
 
@@ -657,9 +619,13 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
         write_health_status("not_ok", "Telegram bot stopped by user.", include_pid=True)
-    except Exception as exc:
-        logger.error("Bot error: %s", exc)
-        write_health_status("not_ok", f"Bot error: {exc}", include_pid=True)
+    except Exception:
+        logger.exception("Bot encountered a fatal error")
+        write_health_status(
+            "not_ok",
+            "Telegram bot encountered a fatal error.",
+            include_pid=True,
+        )
         sys.exit(1)
     finally:
         clear_pid_file(expected_pid=os.getpid())

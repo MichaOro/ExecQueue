@@ -200,6 +200,20 @@ class TestOverallHealth:
         assert summary.checks["slow_check"].status == "ERROR"
         assert summary.checks["slow_check"].detail == "Health check timed out."
 
+    def test_unexpected_exception_is_sanitized(self, monkeypatch):
+        def broken_check():
+            raise RuntimeError("secret connection string")
+
+        monkeypatch.setattr(
+            "execqueue.health.service.get_registered_healthchecks",
+            lambda: [broken_check],
+        )
+
+        summary = get_overall_health()
+
+        assert summary.status == "ERROR"
+        assert summary.checks["broken_check"].detail == "Health check failed."
+
     def test_partial_data_is_treated_as_degraded(self, monkeypatch):
         def partial_check():
             return {"component": "api", "status": "OK"}

@@ -51,10 +51,16 @@ async def trigger_system_restart() -> tuple[bool, str]:
     """Trigger system restart via API."""
     settings = get_settings()
     url = f"http://{settings.execqueue_api_host}:{settings.execqueue_api_port}/restart"
+    headers: dict[str, str] = {}
+
+    if not settings.system_admin_token:
+        return False, "System-Neustart ist nicht konfiguriert; SYSTEM_ADMIN_TOKEN fehlt."
+
+    headers["X-Admin-Token"] = settings.system_admin_token
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(url)
+            response = await client.post(url, headers=headers)
 
         if response.status_code == 200:
             data = response.json()
@@ -329,11 +335,11 @@ def get_health_command_message() -> str:
     try:
         health_summary = get_overall_health()
         return render_health_report(list(health_summary.checks.values()))
-    except Exception as exc:
+    except Exception:
+        logger.exception("Failed to build Telegram health message")
         return (
             "\u274C *Health Check Error*\n\n"
-            "Unable to retrieve health status.\n"
-            f"Error: {exc}"
+            "Unable to retrieve health status. Bitte Logs oder Health-Endpunkte pruefen."
         )
 
 

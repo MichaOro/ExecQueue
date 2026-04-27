@@ -34,7 +34,7 @@ def _execute_restart_script(
     if not script_path.exists():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Restart script not found: {script_path}",
+            detail="Restart script not found.",
         )
 
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -84,7 +84,7 @@ def _execute_restart_script(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initiate restart: {str(exc)}",
+            detail="Failed to initiate restart.",
         )
 
 

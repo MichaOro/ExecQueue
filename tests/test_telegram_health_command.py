@@ -112,9 +112,10 @@ class TestHealthCommandMessage:
 
             message = get_health_command_message()
 
-            assert "❌ *Health Check Error*" in message
+            assert "*Health Check Error*" in message
             assert "Unable to retrieve health status" in message
-            assert "Test error" in message
+            assert "Logs oder Health-Endpunkte" in message
+            assert "Test error" not in message
 
 
 class TestCommandList:

@@ -278,7 +278,7 @@ class TestApiRestartEndpoint:
         response = client.post("/api/restart", headers=headers)
 
         assert response.status_code == 500
-        assert "not found" in response.json()["detail"].lower()
+        assert response.json()["detail"] == "Restart script not found."
 
     def test_api_restart_permission_error(self, monkeypatch, tmp_path):
         from execqueue.api.routes import system
@@ -298,6 +298,25 @@ class TestApiRestartEndpoint:
 
         assert response.status_code == 403
         assert "not executable" in response.json()["detail"].lower()
+
+    def test_api_restart_hides_internal_exception_details(self, monkeypatch, tmp_path):
+        from execqueue.api.routes import system
+
+        headers = install_system_admin_token(monkeypatch)
+        script_path = tmp_path / "api_restart.sh"
+        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        def fake_popen(*args, **kwargs):
+            raise RuntimeError("internal path leak")
+
+        monkeypatch.setattr(system, "API_RESTART_SCRIPT", script_path)
+        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
+
+        client = TestClient(app)
+        response = client.post("/api/restart", headers=headers)
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Failed to initiate restart."
 
 
 class TestTelegramBotRestartEndpoint:

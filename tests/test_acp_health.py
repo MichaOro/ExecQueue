@@ -136,7 +136,10 @@ class TestAcpHealthCheck:
         result = get_acp_healthcheck()
 
         assert result.status == "ERROR"
-        assert "invalid json" in result.detail.lower() or "Failed to read" in result.detail
+        assert result.detail in {
+            "ACP status file contains invalid JSON.",
+            "Failed to read ACP health file.",
+        }
 
     def test_acp_status_degraded_returns_degraded(self, monkeypatch, tmp_path):
         """ACP status degraded should return DEGRADED."""

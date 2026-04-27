@@ -1,6 +1,7 @@
 """ACP health check implementation."""
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ import httpx
 
 from execqueue.health.models import HealthCheckResult
 from execqueue.settings import AcpOperatingMode, get_settings, resolve_acp_mode
+
+logger = logging.getLogger(__name__)
 
 # ACP health status file location
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -114,17 +117,17 @@ def probe_acp_endpoint() -> ProbeResult:
             status="http_error",
             message="ACP endpoint is not reachable (connection refused).",
         )
-    except httpx.InvalidURL as e:
+    except httpx.InvalidURL:
         return ProbeResult(
             reachable=False,
             status="invalid_url",
-            message=f"Invalid ACP_ENDPOINT_URL: {e}.",
+            message="ACP_ENDPOINT_URL is invalid.",
         )
-    except Exception as e:
+    except Exception:
         return ProbeResult(
             reachable=False,
             status="http_error",
-            message=f"ACP endpoint probe failed: {type(e).__name__}.",
+            message="ACP endpoint probe failed.",
         )
 
 
@@ -233,17 +236,17 @@ def get_acp_healthcheck() -> HealthCheckResult:
             detail=detail,
         )
 
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError:
         return HealthCheckResult(
             component="acp",
             status="ERROR",
-            detail=f"ACP status file contains invalid JSON: {e}",
+            detail="ACP status file contains invalid JSON.",
         )
-    except Exception as e:
+    except Exception:
         return HealthCheckResult(
             component="acp",
             status="ERROR",
-            detail=f"Failed to read ACP health: {e}",
+            detail="Failed to read ACP health file.",
         )
 
 
@@ -267,7 +270,4 @@ def write_acp_health_status(status: str, detail: str = "") -> None:
         ACP_HEALTH_FILE.write_text(json.dumps(health_data, indent=2), encoding="utf-8")
     except Exception as exc:
         # Log error but don't raise - health status write should not fail the caller
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.error("Failed to write ACP health status: %s", exc)

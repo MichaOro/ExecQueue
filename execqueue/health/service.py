@@ -164,11 +164,11 @@ def get_overall_health() -> HealthSummary:
                 status=HealthStatus.ERROR,
                 detail="Health check timed out.",
             )
-        except Exception as exc:
+        except Exception:
             result = HealthCheckResult(
                 component=component_name,
                 status=HealthStatus.ERROR,
-                detail=f"Health check failed: {exc}",
+                detail="Health check failed.",
             )
 
         results[result.component] = result
