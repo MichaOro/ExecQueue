@@ -65,11 +65,9 @@ Thumbs.db
 
 # -----------------------------
 # Project-specific
-# -----------------------------
 diff2.config.json
 ops/pids/*.pid
 
-# -----------------------------
 # Health module runtime files
-# -----------------------------
-execqueue/health/telegram_bot.json
+execqueue/health/*.json
+ops/health/*.json

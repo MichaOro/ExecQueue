@@ -134,12 +134,12 @@ def test_router_structure_separates_system_and_domain_areas():
     domain_paths = {route.path for route in domain_router.routes}
 
     assert "/health" in system_paths
-    # Domain router now has system restart endpoint
-    assert "/api/system/restart" in domain_paths
+    assert "/api/system/restart" in system_paths
+    assert "/api/system/restart" not in domain_paths
 
 
 def test_system_restart_spawns_detached_process(monkeypatch, tmp_path):
-    from execqueue.api.routes import domain
+    from execqueue.api.routes import system
 
     script_path = tmp_path / "global_restart.sh"
     script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
@@ -154,8 +154,8 @@ def test_system_restart_spawns_detached_process(monkeypatch, tmp_path):
         popen_calls["kwargs"] = kwargs
         return FakeProcess()
 
-    monkeypatch.setattr(domain, "RESTART_SCRIPT", script_path)
-    monkeypatch.setattr(domain.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(system, "RESTART_SCRIPT", script_path)
+    monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
 
     client = TestClient(app)
     response = client.post("/api/system/restart")
@@ -163,11 +163,162 @@ def test_system_restart_spawns_detached_process(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.json()["pid"] == 12345
     assert popen_calls["args"] == ([str(script_path)],)
-    assert popen_calls["kwargs"]["stdout"] is domain.subprocess.DEVNULL
-    assert popen_calls["kwargs"]["stderr"] is domain.subprocess.DEVNULL
-    assert popen_calls["kwargs"]["stdin"] is domain.subprocess.DEVNULL
+    assert popen_calls["kwargs"]["stdout"] is system.subprocess.DEVNULL
+    assert popen_calls["kwargs"]["stderr"] is system.subprocess.DEVNULL
+    assert popen_calls["kwargs"]["stdin"] is system.subprocess.DEVNULL
     assert popen_calls["kwargs"]["close_fds"] is True
     assert popen_calls["kwargs"]["start_new_session"] is True
+
+
+class TestApiRestartEndpoint:
+    """Tests for the API restart endpoint."""
+
+    def test_api_restart_endpoint_exists(self, monkeypatch, tmp_path):
+        from execqueue.api.routes import system
+
+        script_path = tmp_path / "api_restart.sh"
+        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        class FakeProcess:
+            pid = 12346
+
+        def fake_popen(*args, **kwargs):
+            return FakeProcess()
+
+        monkeypatch.setattr(system, "API_RESTART_SCRIPT", script_path)
+        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
+
+        client = TestClient(app)
+        response = client.post("/api/restart")
+
+        assert response.status_code == 200
+        assert response.json()["pid"] == 12346
+        assert response.json()["status"] == "initiated"
+
+    def test_api_restart_spawns_detached_process(self, monkeypatch, tmp_path):
+        from execqueue.api.routes import system
+
+        script_path = tmp_path / "api_restart.sh"
+        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        popen_calls: dict[str, object] = {}
+
+        class FakeProcess:
+            pid = 12346
+
+        def fake_popen(*args, **kwargs):
+            popen_calls["args"] = args
+            popen_calls["kwargs"] = kwargs
+            return FakeProcess()
+
+        monkeypatch.setattr(system, "API_RESTART_SCRIPT", script_path)
+        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
+
+        client = TestClient(app)
+        response = client.post("/api/restart")
+
+        assert response.status_code == 200
+        assert response.json()["pid"] == 12346
+        assert popen_calls["args"] == ([str(script_path)],)
+        assert popen_calls["kwargs"]["start_new_session"] is True
+
+    def test_api_restart_script_not_found(self, monkeypatch):
+        from execqueue.api.routes import system
+
+        class FakePath:
+            def exists(self):
+                return False
+
+        monkeypatch.setattr(system, "API_RESTART_SCRIPT", FakePath())
+
+        client = TestClient(app)
+        response = client.post("/api/restart")
+
+        assert response.status_code == 500
+        assert "not found" in response.json()["detail"].lower()
+
+    def test_api_restart_permission_error(self, monkeypatch, tmp_path):
+        from execqueue.api.routes import system
+
+        script_path = tmp_path / "api_restart.sh"
+        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        def fake_popen(*args, **kwargs):
+            raise PermissionError("Script not executable")
+
+        monkeypatch.setattr(system, "API_RESTART_SCRIPT", script_path)
+        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
+
+        client = TestClient(app)
+        response = client.post("/api/restart")
+
+        assert response.status_code == 403
+        assert "not executable" in response.json()["detail"].lower()
+
+
+class TestTelegramBotRestartEndpoint:
+    """Tests for the Telegram Bot restart endpoint."""
+
+    def test_telegram_bot_restart_endpoint_exists(self, monkeypatch, tmp_path):
+        from execqueue.api.routes import system
+
+        script_path = tmp_path / "telegram_restart.sh"
+        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        class FakeProcess:
+            pid = 12347
+
+        def fake_popen(*args, **kwargs):
+            return FakeProcess()
+
+        monkeypatch.setattr(system, "TELEGRAM_RESTART_SCRIPT", script_path)
+        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
+
+        client = TestClient(app)
+        response = client.post("/api/telegram_bot/restart")
+
+        assert response.status_code == 200
+        assert response.json()["pid"] == 12347
+        assert response.json()["status"] == "initiated"
+
+    def test_telegram_bot_restart_spawns_detached_process(self, monkeypatch, tmp_path):
+        from execqueue.api.routes import system
+
+        script_path = tmp_path / "telegram_restart.sh"
+        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        popen_calls: dict[str, object] = {}
+
+        class FakeProcess:
+            pid = 12347
+
+        def fake_popen(*args, **kwargs):
+            popen_calls["args"] = args
+            popen_calls["kwargs"] = kwargs
+            return FakeProcess()
+
+        monkeypatch.setattr(system, "TELEGRAM_RESTART_SCRIPT", script_path)
+        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
+
+        client = TestClient(app)
+        response = client.post("/api/telegram_bot/restart")
+
+        assert response.status_code == 200
+        assert popen_calls["kwargs"]["start_new_session"] is True
+
+    def test_telegram_bot_restart_script_not_found(self, monkeypatch):
+        from execqueue.api.routes import system
+
+        class FakePath:
+            def exists(self):
+                return False
+
+        monkeypatch.setattr(system, "TELEGRAM_RESTART_SCRIPT", FakePath())
+
+        client = TestClient(app)
+        response = client.post("/api/telegram_bot/restart")
+
+        assert response.status_code == 500
 
 
 class TestLivenessEndpoint:

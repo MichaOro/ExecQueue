@@ -15,14 +15,16 @@ fi
 
 PID_DIR="${OPS_DIR}/pids"
 LOG_DIR="${OPS_DIR}/logs"
+LOCK_DIR="${OPS_DIR}/locks"
 PID_FILE="${PID_DIR}/api.pid"
+LOCK_FILE="${LOCK_DIR}/api.restart.lock"
 LOG_FILE="${LOG_DIR}/api.log"
 HOST="${EXECQUEUE_API_HOST:-0.0.0.0}"
 PORT="${EXECQUEUE_API_PORT:-8000}"
 APP_MODULE="${EXECQUEUE_API_APP:-execqueue.main:app}"
 PYTHON_BIN="${EXECQUEUE_PYTHON_BIN:-python3}"
 
-mkdir -p "${PID_DIR}" "${LOG_DIR}"
+mkdir -p "${PID_DIR}" "${LOG_DIR}" "${LOCK_DIR}"
 
 log() {
     printf '[api_restart] %s\n' "$1"
@@ -37,10 +39,32 @@ is_pid_running() {
     kill -0 "${pid}" >/dev/null 2>&1
 }
 
+acquire_lock() {
+    # Try to create lock file atomically
+    if (set -C; echo $$) > "${LOCK_FILE}" 2>/dev/null; then
+        # Set trap to release lock on exit
+        trap 'release_lock' EXIT
+        return 0
+    else
+        local existing_pid
+        if [[ -f "${LOCK_FILE}" ]]; then
+            existing_pid="$(cat "${LOCK_FILE}" 2>/dev/null || echo "unknown")"
+        fi
+        log "Another restart is in progress (lock held by PID ${existing_pid}). Aborting."
+        log_to_file "Another restart is in progress (lock held by PID ${existing_pid}). Aborting."
+        return 1
+    fi
+}
+
+release_lock() {
+    rm -f "${LOCK_FILE}"
+}
+
 list_matching_pids() {
     local -a found_pids=()
     local pid_text
 
+    # Always check PID file first
     if [[ -f "${PID_FILE}" ]]; then
         pid_text="$(cat "${PID_FILE}")"
         if [[ -n "${pid_text}" ]]; then
@@ -48,12 +72,14 @@ list_matching_pids() {
         fi
     fi
 
+    # Find all uvicorn processes for this app module
     if command -v pgrep >/dev/null 2>&1; then
         while IFS= read -r pid_text; do
             [[ -n "${pid_text}" ]] && found_pids+=("${pid_text}")
         done < <(pgrep -f "uvicorn ${APP_MODULE}" || true)
     fi
 
+    # Check for processes listening on the port
     if command -v lsof >/dev/null 2>&1; then
         while IFS= read -r pid_text; do
             [[ -n "${pid_text}" ]] && found_pids+=("${pid_text}")
@@ -72,6 +98,7 @@ list_matching_pids() {
         )
     fi
 
+    # Return unique PIDs only
     printf '%s\n' "${found_pids[@]}" | awk 'NF { print $1 }' | sort -u
 }
 
@@ -95,26 +122,43 @@ stop_existing_process() {
         [[ -n "${pid}" ]] && pids+=("${pid}")
     done < <(list_matching_pids)
 
+    # Remove duplicates and filter out current shell process
+    local -a unique_pids=()
+    local seen_pids=""
+    for pid in "${pids[@]}"; do
+        if [[ ! " ${seen_pids} " =~ " ${pid} " ]] && [[ "${pid}" != "$$" ]]; then
+            unique_pids+=("${pid}")
+            seen_pids="${seen_pids} ${pid}"
+        fi
+    done
+    pids=("${unique_pids[@]}")
+
     if [[ "${#pids[@]}" -eq 0 ]]; then
         rm -f "${PID_FILE}"
+        log "No existing API processes found."
+        log_to_file "No existing API processes found."
         return 0
     fi
 
+    log "Found ${#pids[@]} existing API process(es): ${pids[*]}."
+    log_to_file "Found ${#pids[@]} existing API process(es): ${pids[*]}."
+
+    # First pass: graceful SIGTERM to all
     for pid in "${pids[@]}"; do
         if ! is_pid_running "${pid}"; then
-            log "Found stale PID ${pid}, nothing to stop."
-            log_to_file "Found stale PID ${pid}, nothing to stop."
+            log "Process ${pid} is already stopped (stale). Removing from list."
             continue
         fi
 
-        log "Stopping existing API process ${pid}."
-        log_to_file "Stopping existing API process ${pid}."
+        log "Sending SIGTERM to API process ${pid}."
+        log_to_file "Sending SIGTERM to API process ${pid}."
         kill "${pid}" >/dev/null 2>&1 || true
     done
 
+    # Wait for graceful shutdown (up to 10 seconds)
     local waited=0
     local all_stopped=0
-    while [[ "${waited}" -lt 20 ]]; do
+    while [[ "${waited}" -lt 10 ]]; do
         all_stopped=1
         for pid in "${pids[@]}"; do
             if is_pid_running "${pid}"; then
@@ -127,25 +171,45 @@ stop_existing_process() {
         fi
         sleep 1
         waited=$((waited + 1))
+        log "Waiting for processes to stop... (${waited}/10s)"
     done
 
+    # Second pass: force SIGKILL to any remaining
+    local force_killed=0
     for pid in "${pids[@]}"; do
         if is_pid_running "${pid}"; then
             log "Process ${pid} did not stop gracefully, sending SIGKILL."
             log_to_file "Process ${pid} did not stop gracefully, sending SIGKILL."
             kill -9 "${pid}" >/dev/null 2>&1 || true
+            force_killed=1
         fi
     done
 
-    sleep 1
+    if [[ "${force_killed}" -eq 1 ]]; then
+        sleep 1
+    fi
 
-    for pid in "${pids[@]}"; do
-        if is_pid_running "${pid}"; then
-            log "Failed to stop process ${pid}."
-            log_to_file "Failed to stop process ${pid}."
-            return 1
+    # Final verification: port should be free
+    local port_still_in_use=0
+    if command -v lsof >/dev/null 2>&1; then
+        if lsof -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+            port_still_in_use=1
         fi
-    done
+    elif command -v ss >/dev/null 2>&1; then
+        if ss -lptn "sport = :${PORT}" 2>/dev/null | grep -q .; then
+            port_still_in_use=1
+        fi
+    fi
+
+    if [[ "${port_still_in_use}" -eq 1 ]]; then
+        log "WARNING: Port ${PORT} is still in use after killing processes."
+        log_to_file "WARNING: Port ${PORT} is still in use after killing processes."
+        # Try one more aggressive cleanup
+        if command -v fuser >/dev/null 2>&1; then
+            fuser -k "${PORT}/tcp" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
 
     rm -f "${PID_FILE}"
     log "Stopped existing API processes: ${pids[*]}."
@@ -186,6 +250,11 @@ start_process() {
 }
 
 main() {
+    # Acquire lock to prevent concurrent restarts
+    if ! acquire_lock; then
+        exit 1
+    fi
+
     cleanup_stale_pid
 
     if ! stop_existing_process; then

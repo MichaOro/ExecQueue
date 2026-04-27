@@ -39,6 +39,9 @@ run_step() {
 }
 
 main() {
+    # Define PROJECT_ROOT
+    PROJECT_ROOT="$(cd "${OPS_DIR}/.." && pwd)"
+
     # Load environment to check ACP_ENABLED
     if [[ -f "${PROJECT_ROOT}/.env" ]]; then
         set -a

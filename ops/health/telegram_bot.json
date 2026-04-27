@@ -1,6 +1,0 @@
-{
-  "component": "telegram_bot",
-  "status": "ok",
-  "detail": "Telegram bot is running and polling for updates.",
-  "last_check": "2026-04-26T22:23:48.584053+00:00"
-}
