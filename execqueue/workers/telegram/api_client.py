@@ -24,7 +24,7 @@ class TelegramAPIClient:
         created_by_ref: str,
     ) -> tuple[bool, str]:
         """Create a task via the internal API."""
-        url = f"{self.base_url}/api/tasks"
+        url = f"{self.base_url}/api/task"
         payload = {
             "type": task_type,
             "prompt": prompt,
@@ -55,7 +55,7 @@ class TelegramAPIClient:
 
     async def get_task_status(self, task_number: int) -> tuple[bool, str | dict]:
         """Get task status via the internal API."""
-        url = f"{self.base_url}/api/tasks/{task_number}/status"
+        url = f"{self.base_url}/api/task/{task_number}/status"
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:

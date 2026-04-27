@@ -37,6 +37,15 @@ is_pid_running() {
     kill -0 "${pid}" >/dev/null 2>&1
 }
 
+is_protected_pid() {
+    local pid="$1"
+    [[ -z "${pid}" ]] && return 0
+    [[ "${pid}" == "$$" ]] && return 0
+    [[ "${pid}" == "${PPID:-}" ]] && return 0
+    [[ -n "${BASHPID:-}" && "${pid}" == "${BASHPID}" ]] && return 0
+    return 1
+}
+
 acquire_lock() {
     # Try to create lock file atomically
     if (set -C; echo $$) > "${LOCK_FILE}" 2>/dev/null; then
@@ -99,7 +108,10 @@ stop_existing_process() {
     local -a unique_pids=()
     local seen_pids=""
     for pid in "${pids[@]}"; do
-        if [[ ! " ${seen_pids} " =~ " ${pid} " ]] && [[ "${pid}" != "$$" ]]; then
+        if is_protected_pid "${pid}"; then
+            continue
+        fi
+        if [[ ! " ${seen_pids} " =~ " ${pid} " ]]; then
             unique_pids+=("${pid}")
             seen_pids="${seen_pids} ${pid}"
         fi

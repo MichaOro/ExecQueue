@@ -1,10 +1,12 @@
 """Tests for Telegram bot module."""
 
+import asyncio
 import os
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from unittest.mock import AsyncMock
 
 
 class TestTelegramBotModule:
@@ -32,10 +34,7 @@ class TestTelegramBotModule:
 
         # run_bot should return without error when disabled
         result = bot.run_bot()
-        # It returns a coroutine, so we need to await it
-        import asyncio
-
-        asyncio.get_event_loop().run_until_complete(result)
+        asyncio.run(result)
 
     @pytest.mark.asyncio
     async def test_run_bot_exits_when_enabled_no_token(self, monkeypatch):
@@ -83,6 +82,47 @@ class TestTelegramBotModule:
 
         assert callable(help_command)
 
+    @pytest.mark.asyncio
+    async def test_start_command_shows_base_message_for_regular_user(self):
+        """Regular users should only see the base /start text."""
+        from execqueue.workers.telegram.bot import start_command
+
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.reply_text = AsyncMock()
+        update.effective_user.id = 123
+
+        with patch(
+            "execqueue.workers.telegram.auth.get_user_info",
+            return_value=("user", True),
+        ):
+            await start_command(update, MagicMock())
+
+        message = update.message.reply_text.call_args[0][0]
+        assert "/start - Start the bot and show available commands" in message
+        assert "/help - Show help and usage information" not in message
+        assert "/health - Check system health status" not in message
+
+    @pytest.mark.asyncio
+    async def test_start_command_shows_operator_extras(self):
+        """Operators should see /help and /health in /start."""
+        from execqueue.workers.telegram.bot import start_command
+
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.reply_text = AsyncMock()
+        update.effective_user.id = 123
+
+        with patch(
+            "execqueue.workers.telegram.auth.get_user_info",
+            return_value=("operator", True),
+        ):
+            await start_command(update, MagicMock())
+
+        message = update.message.reply_text.call_args[0][0]
+        assert "/help - Show help and usage information" in message
+        assert "/health - Check system health status" in message
+
 
 class TestBotWithMockedTelegram:
     """Test bot with mocked telegram library."""
@@ -98,3 +138,97 @@ class TestBotWithMockedTelegram:
         assert callable(start_command)
         assert callable(health_command)
         assert callable(restart_command)
+
+
+class TestBotShutdownHelpers:
+    """Tests for Telegram bot shutdown helpers."""
+
+    @pytest.mark.asyncio
+    async def test_stop_bot_application_cleans_up_pid_file(self, monkeypatch, tmp_path):
+        """Shutdown helper should await cleanup hooks and remove the current PID file."""
+        from execqueue.workers.telegram import bot
+
+        pid_file = tmp_path / "telegram_bot.pid"
+        health_file = tmp_path / "telegram_bot.json"
+        monkeypatch.setattr(bot, "PID_FILE", pid_file)
+        monkeypatch.setattr(bot, "HEALTH_FILE", health_file)
+
+        shutdown_event = asyncio.Event()
+        application = MagicMock()
+        application.updater = MagicMock()
+        application.updater.stop = AsyncMock()
+        application.stop = AsyncMock()
+        application.shutdown = AsyncMock()
+
+        bot.write_pid_file(os.getpid())
+
+        await bot.stop_bot_application(application, shutdown_event, timeout=1)
+
+        assert shutdown_event.is_set()
+        application.updater.stop.assert_awaited_once()
+        application.stop.assert_awaited_once()
+        application.shutdown.assert_awaited_once()
+        assert not pid_file.exists()
+        assert '"status": "not_ok"' in health_file.read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_stop_bot_application_times_out_and_still_signals_shutdown(
+        self, monkeypatch, tmp_path
+    ):
+        """Timeouts during shutdown should still set the shutdown event and clear the PID file."""
+        from execqueue.workers.telegram import bot
+
+        pid_file = tmp_path / "telegram_bot.pid"
+        health_file = tmp_path / "telegram_bot.json"
+        monkeypatch.setattr(bot, "PID_FILE", pid_file)
+        monkeypatch.setattr(bot, "HEALTH_FILE", health_file)
+
+        async def slow_stop() -> None:
+            await asyncio.sleep(0.05)
+
+        shutdown_event = asyncio.Event()
+        application = MagicMock()
+        application.updater = MagicMock()
+        application.updater.stop = AsyncMock(side_effect=slow_stop)
+        application.stop = AsyncMock()
+        application.shutdown = AsyncMock()
+
+        bot.write_pid_file(os.getpid())
+
+        await bot.stop_bot_application(application, shutdown_event, timeout=0.01)
+
+        assert shutdown_event.is_set()
+        assert not pid_file.exists()
+        assert "timed out" in health_file.read_text(encoding="utf-8").lower()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_handler_schedules_async_cleanup(self, monkeypatch, tmp_path):
+        """Signal handler should schedule the async shutdown path instead of stopping the loop directly."""
+        from execqueue.workers.telegram import bot
+
+        pid_file = tmp_path / "telegram_bot.pid"
+        health_file = tmp_path / "telegram_bot.json"
+        monkeypatch.setattr(bot, "PID_FILE", pid_file)
+        monkeypatch.setattr(bot, "HEALTH_FILE", health_file)
+
+        shutdown_event = asyncio.Event()
+        application = MagicMock()
+        application.updater = MagicMock()
+        application.updater.stop = AsyncMock()
+        application.stop = AsyncMock()
+        application.shutdown = AsyncMock()
+
+        bot.write_pid_file(os.getpid())
+        handler = bot.create_shutdown_handler(
+            asyncio.get_running_loop(),
+            application,
+            shutdown_event,
+            timeout=1,
+        )
+
+        handler()
+        await asyncio.wait_for(shutdown_event.wait(), timeout=0.5)
+
+        application.updater.stop.assert_awaited_once()
+        application.stop.assert_awaited_once()
+        application.shutdown.assert_awaited_once()

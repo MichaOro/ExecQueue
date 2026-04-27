@@ -30,7 +30,7 @@ async def test_create_task_uses_current_api_contract():
     assert success is True
     assert message == "Aufgabe #41 wurde erstellt."
     mock_client.post.assert_called_once_with(
-        f"{client.base_url}/api/tasks",
+        f"{client.base_url}/api/task",
         json={
             "type": "task",
             "prompt": "Summarize the release",

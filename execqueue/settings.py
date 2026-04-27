@@ -92,6 +92,12 @@ class Settings(BaseSettings):
         le=60,
         description="Timeout for Telegram polling in seconds (1-60).",
     )
+    telegram_shutdown_timeout: int = Field(
+        default=8,
+        ge=1,
+        le=60,
+        description="Maximum graceful shutdown time for the Telegram bot in seconds.",
+    )
     telegram_admin_user_id: str | None = Field(
         default=None,
         description="User ID for admin notifications (optional). Use your Telegram user ID.",

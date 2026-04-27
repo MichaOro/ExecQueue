@@ -85,7 +85,7 @@ def _execute_restart_script(
 
 
 @router.post(
-    "/api/system/restart",
+    "/restart",
     summary="Restart all system services (API and Telegram Bot)",
     operation_id="system_restart_post",
     tags=["System"],

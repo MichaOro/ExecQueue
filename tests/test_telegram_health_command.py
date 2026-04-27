@@ -6,6 +6,7 @@ from execqueue.workers.telegram.commands import (
     _get_status_emoji,
     get_command_list,
     get_health_command_message,
+    get_operator_start_command_list,
 )
 
 
@@ -119,9 +120,16 @@ class TestHealthCommandMessage:
 class TestCommandList:
     """Tests for the command list."""
 
-    def test_health_command_in_list(self):
-        commands = get_command_list()
+    def test_health_command_in_operator_start_list(self):
+        commands = get_operator_start_command_list()
         health_cmd = next((cmd for cmd in commands if cmd["command"] == "health"), None)
 
         assert health_cmd is not None
         assert health_cmd["description"] == "Check system health status"
+
+    def test_base_command_list_only_contains_start(self):
+        commands = get_command_list()
+        start_cmd = next((cmd for cmd in commands if cmd["command"] == "start"), None)
+
+        assert start_cmd is not None
+        assert len(commands) == 1

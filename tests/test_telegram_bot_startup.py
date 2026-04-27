@@ -24,6 +24,7 @@ class TestRunBot:
             with patch("execqueue.workers.telegram.bot.get_settings") as mock_get_settings:
                 mock_settings = MagicMock()
                 mock_settings.telegram_bot_enabled = False
+                mock_settings.telegram_shutdown_timeout = 8
                 mock_get_settings.return_value = mock_settings
 
                 # Should return immediately without error
@@ -42,6 +43,7 @@ class TestRunBot:
                 mock_settings.telegram_bot_enabled = True
                 mock_settings.telegram_bot_token = None
                 mock_settings.telegram_polling_timeout = 30
+                mock_settings.telegram_shutdown_timeout = 8
                 mock_get_settings.return_value = mock_settings
 
                 with patch("execqueue.workers.telegram.bot.sys") as mock_sys:
@@ -73,6 +75,7 @@ class TestRunBot:
                 mock_settings.telegram_bot_enabled = True
                 mock_settings.telegram_bot_token = "test_token"
                 mock_settings.telegram_polling_timeout = 30
+                mock_settings.telegram_shutdown_timeout = 8
                 mock_get_settings.return_value = mock_settings
 
                 with patch("execqueue.workers.telegram.bot.create_bot_application") as mock_create_app:
@@ -80,12 +83,14 @@ class TestRunBot:
                     mock_app.initialize = AsyncMock()
                     mock_app.start = AsyncMock()
                     mock_app.stop = AsyncMock()
+                    mock_app.shutdown = AsyncMock()
                     mock_app.updater = MagicMock()
                     mock_app.updater.start_polling = AsyncMock()
+                    mock_app.updater.stop = AsyncMock()
                     mock_create_app.return_value = mock_app
 
                     with patch("execqueue.workers.telegram.bot.send_startup_notification") as mock_send_startup:
-                        with patch("asyncio.Event") as mock_event_class:
+                        with patch("execqueue.workers.telegram.bot.asyncio.Event") as mock_event_class:
                             mock_event = AsyncMock()
                             mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
                             mock_event_class.return_value = mock_event
@@ -118,6 +123,7 @@ class TestRunBot:
                 mock_settings.telegram_bot_token = "test_token"
                 mock_settings.telegram_polling_timeout = 30
                 mock_settings.telegram_notification_user_id = "123456789"
+                mock_settings.telegram_shutdown_timeout = 8
                 mock_get_settings.return_value = mock_settings
 
                 with patch("execqueue.workers.telegram.bot.create_bot_application") as mock_create_app:
@@ -125,12 +131,14 @@ class TestRunBot:
                     mock_app.initialize = AsyncMock()
                     mock_app.start = AsyncMock()
                     mock_app.stop = AsyncMock()
+                    mock_app.shutdown = AsyncMock()
                     mock_app.updater = MagicMock()
                     mock_app.updater.start_polling = AsyncMock()
+                    mock_app.updater.stop = AsyncMock()
                     mock_create_app.return_value = mock_app
 
                     with patch("execqueue.workers.telegram.bot.send_startup_notification") as mock_send_startup:
-                        with patch("asyncio.Event") as mock_event_class:
+                        with patch("execqueue.workers.telegram.bot.asyncio.Event") as mock_event_class:
                             mock_event = AsyncMock()
                             mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
                             mock_event_class.return_value = mock_event
@@ -159,6 +167,7 @@ class TestRunBot:
                 mock_settings.telegram_bot_token = "test_token"
                 mock_settings.telegram_polling_timeout = 30
                 mock_settings.telegram_notification_user_id = "123456789"
+                mock_settings.telegram_shutdown_timeout = 8
                 mock_get_settings.return_value = mock_settings
 
                 with patch("execqueue.workers.telegram.bot.create_bot_application") as mock_create_app:
@@ -166,15 +175,17 @@ class TestRunBot:
                     mock_app.initialize = AsyncMock()
                     mock_app.start = AsyncMock()
                     mock_app.stop = AsyncMock()
+                    mock_app.shutdown = AsyncMock()
                     mock_app.updater = MagicMock()
                     mock_app.updater.start_polling = AsyncMock()
+                    mock_app.updater.stop = AsyncMock()
                     mock_create_app.return_value = mock_app
 
                     with patch("execqueue.workers.telegram.bot.send_startup_notification") as mock_send_startup:
                         # Simulate notification failure (raises exception)
                         mock_send_startup.side_effect = Exception("Notification failed")
                         
-                        with patch("asyncio.Event") as mock_event_class:
+                        with patch("execqueue.workers.telegram.bot.asyncio.Event") as mock_event_class:
                             mock_event = AsyncMock()
                             # Don't raise CancelledError immediately, let the test complete normally
                             mock_event.wait = AsyncMock()
@@ -215,28 +226,29 @@ class TestBotLifecycle:
                 mock_settings.telegram_bot_enabled = True
                 mock_settings.telegram_bot_token = "test_token"
                 mock_settings.telegram_polling_timeout = 30
+                mock_settings.telegram_shutdown_timeout = 8
                 mock_get_settings.return_value = mock_settings
 
                 with patch("execqueue.workers.telegram.bot.create_bot_application") as mock_create_app:
                     mock_app = MagicMock()
                     mock_app.initialize = AsyncMock()
                     mock_app.start = AsyncMock()
+                    mock_app.stop = AsyncMock()
+                    mock_app.shutdown = AsyncMock()
                     mock_app.updater = MagicMock()
-                    mock_app.updater.start_polling = AsyncMock()
+                    mock_app.updater.start_polling = AsyncMock(
+                        side_effect=asyncio.CancelledError()
+                    )
+                    mock_app.updater.stop = AsyncMock()
                     mock_create_app.return_value = mock_app
 
-                    with patch("asyncio.Event") as mock_event_class:
-                        mock_event = AsyncMock()
-                        mock_event.wait = AsyncMock(side_effect=asyncio.CancelledError())
-                        mock_event_class.return_value = mock_event
+                    with patch("asyncio.get_running_loop") as mock_loop:
+                        mock_loop_instance = MagicMock()
+                        mock_loop.return_value = mock_loop_instance
+                        mock_loop_instance.add_signal_handler = MagicMock()
 
-                        with patch("asyncio.get_running_loop") as mock_loop:
-                            mock_loop_instance = MagicMock()
-                            mock_loop.return_value = mock_loop_instance
-                            mock_loop_instance.add_signal_handler = MagicMock()
+                        with pytest.raises(asyncio.CancelledError):
+                            await run_bot()
 
-                            with pytest.raises(asyncio.CancelledError):
-                                await run_bot()
-
-                            # Verify signal handlers were registered
-                            assert mock_loop_instance.add_signal_handler.called
+                        # Verify signal handlers were registered
+                        assert mock_loop_instance.add_signal_handler.called

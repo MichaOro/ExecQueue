@@ -61,6 +61,14 @@ class TestSettingsDefaults:
         settings = TestSettings()
         assert settings.telegram_polling_timeout == 30
 
+    def test_telegram_shutdown_timeout_default(self):
+        """Test that telegram_shutdown_timeout defaults to 8."""
+        class TestSettings(Settings):
+            model_config = SettingsConfigDict(env_file="", extra="ignore")
+
+        settings = TestSettings()
+        assert settings.telegram_shutdown_timeout == 8
+
     def test_telegram_admin_user_id_default(self):
         """Test that telegram_admin_user_id defaults to None."""
         class TestSettings(Settings):
@@ -247,6 +255,12 @@ class TestSettingsFromEnvironment:
             settings = Settings()
             assert settings.telegram_polling_timeout == 45
 
+    def test_telegram_shutdown_timeout_from_env(self):
+        """Test that telegram_shutdown_timeout is loaded from environment."""
+        with patch.dict(os.environ, {"TELEGRAM_SHUTDOWN_TIMEOUT": "12"}):
+            settings = Settings()
+            assert settings.telegram_shutdown_timeout == 12
+
     def test_telegram_admin_user_id_from_env(self):
         """Test that telegram_admin_user_id is loaded from environment."""
         with patch.dict(os.environ, {"TELEGRAM_ADMIN_USER_ID": "123456789"}):
@@ -401,6 +415,18 @@ class TestSettingsValidation:
         with patch.dict(os.environ, {"TELEGRAM_POLLING_TIMEOUT": "60"}):
             settings = Settings()
             assert settings.telegram_polling_timeout == 60
+
+    def test_telegram_shutdown_timeout_minimum(self):
+        """Test that shutdown timeout respects minimum value."""
+        with patch.dict(os.environ, {"TELEGRAM_SHUTDOWN_TIMEOUT": "1"}):
+            settings = Settings()
+            assert settings.telegram_shutdown_timeout == 1
+
+    def test_telegram_shutdown_timeout_maximum(self):
+        """Test that shutdown timeout respects maximum value."""
+        with patch.dict(os.environ, {"TELEGRAM_SHUTDOWN_TIMEOUT": "60"}):
+            settings = Settings()
+            assert settings.telegram_shutdown_timeout == 60
 
     def test_api_port_minimum(self):
         """Test that API port respects minimum value."""

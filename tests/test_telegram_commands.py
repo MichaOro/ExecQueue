@@ -16,6 +16,7 @@ from execqueue.workers.telegram.commands import (
     create_start,
     create_task_type,
     get_health_command_message,
+    get_help_message,
     get_start_message,
     status_command,
 )
@@ -130,9 +131,35 @@ class TestCommandMessages:
 
         assert "👋 Welcome" in message
         assert "Available commands:" in message
-        assert "/start" in message
-        assert "/help" in message
-        assert "/health" in message
+        assert "/start - Start the bot and show available commands" in message
+        assert "/help" not in message
+        assert "/health" not in message
+
+    def test_get_start_message_for_operator_contains_extra_commands(self):
+        """Operators should see extra commands in /start."""
+        message = get_start_message(role="operator", is_active=True)
+
+        assert "/start - Start the bot and show available commands" in message
+        assert "/help - Show help and usage information" in message
+        assert "/health - Check system health status" in message
+
+    def test_get_help_message_for_operator(self):
+        """Operators should see help and task commands."""
+        message = get_help_message(role="operator", is_active=True)
+
+        assert "/help - Show help and usage information" in message
+        assert "/health - Check system health status" in message
+        assert "/create - Neue Aufgabe erstellen" in message
+        assert "/status <ID> - Aufgabestatus abfragen" in message
+        assert "/restart - System neu starten" not in message
+
+    def test_get_help_message_for_admin(self):
+        """Admins should also see restart in /help."""
+        message = get_help_message(role="admin", is_active=True)
+
+        assert "/create - Neue Aufgabe erstellen" in message
+        assert "/status <ID> - Aufgabestatus abfragen" in message
+        assert "/restart - System neu starten" in message
 
     def test_get_health_command_message(self):
         """Test health command message content."""
@@ -148,7 +175,7 @@ class TestCommandMessages:
         commands = get_command_list()
 
         assert isinstance(commands, list)
-        assert len(commands) == 5  # Added /create and /status
+        assert len(commands) == 1
 
         for cmd in commands:
             assert "command" in cmd
@@ -549,6 +576,8 @@ class TestHelpCommandEnhanced:
         assert "/create" in message
         assert "/status" in message
         assert "/restart" in message
+        assert "/help - Show help and usage information" in message
+        assert "/health - Check system health status" in message
 
     @pytest.mark.asyncio
     async def test_help_shows_task_commands_for_operator(self):
@@ -572,6 +601,8 @@ class TestHelpCommandEnhanced:
         assert "/create" in message
         assert "/status" in message
         assert "/restart" not in message  # admin only
+        assert "/help - Show help and usage information" in message
+        assert "/health - Check system health status" in message
 
     @pytest.mark.asyncio
     async def test_help_hides_task_commands_for_user(self):
@@ -593,6 +624,8 @@ class TestHelpCommandEnhanced:
 
         message = update.message.reply_text.call_args[0][0]
         assert "/create" not in message
+        assert "/restart" not in message
+        assert "/start - Start the bot and show available commands" in message
 
 
 class TestRestartCommand:

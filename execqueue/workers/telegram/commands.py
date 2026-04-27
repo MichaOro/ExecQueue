@@ -34,30 +34,24 @@ CREATE_PROMPT = 2
 
 
 def get_command_list() -> list[dict[str, str]]:
-    """Return the static list of available bot commands for /start."""
+    """Return the base command list shown to every user in /start."""
     return [
         {"command": "start", "description": "Start the bot and show available commands"},
-        {"command": "help", "description": "Show help and usage information"},
-        {"command": "health", "description": "Check system health status"},
-        {"command": "create", "description": "Create a new task or requirement"},
-        {"command": "status", "description": "Check status of a task"},
     ]
 
 
-def get_admin_command_list() -> list[dict[str, str]]:
-    """Return admin-only commands for /help."""
+def get_operator_start_command_list() -> list[dict[str, str]]:
+    """Return additional /start commands for operators and admins."""
     return [
-        {
-            "command": "restart",
-            "description": "System neu starten (Admin only) - /restart [acp|all]",
-        },
+        {"command": "help", "description": "Show help and usage information"},
+        {"command": "health", "description": "Check system health status"},
     ]
 
 
 async def trigger_system_restart() -> tuple[bool, str]:
     """Trigger system restart via API."""
     settings = get_settings()
-    url = f"http://{settings.execqueue_api_host}:{settings.execqueue_api_port}/api/system/restart"
+    url = f"http://{settings.execqueue_api_host}:{settings.execqueue_api_port}/restart"
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -120,7 +114,7 @@ async def trigger_system_restart_all() -> tuple[bool, str]:
     return True, "Vollständiger Neustart (System + ACP) wurde ausgelöst."
 
 
-def get_start_message() -> str:
+def get_start_message(role: str | None = None, is_active: bool = False) -> str:
     """Generate the welcome message for /start."""
     commands = get_command_list()
     message = "\U0001F44B Welcome to ExecQueue Bot!\n\n"
@@ -128,6 +122,30 @@ def get_start_message() -> str:
 
     for cmd in commands:
         message += f"/{cmd['command']} - {cmd['description']}\n"
+
+    if is_active and role in {"admin", "operator"}:
+        for cmd in get_operator_start_command_list():
+            message += f"/{cmd['command']} - {cmd['description']}\n"
+
+    return message
+
+
+def get_help_message(role: str | None = None, is_active: bool = False) -> str:
+    """Generate the role-based help message."""
+    message = "\U0001F4D6 *ExecQueue Bot Help*\n\n"
+
+    if is_active and role in {"admin", "operator"}:
+        message += "/help - Show help and usage information\n"
+        message += "/health - Check system health status\n"
+        message += "\n\U0001F4DD Aufgaben:\n"
+        message += "/create - Neue Aufgabe erstellen\n"
+        message += "/status <ID> - Aufgabestatus abfragen\n"
+
+        if role == "admin":
+            message += "\n\u2699\ufe0f Administration:\n"
+            message += "/restart - System neu starten\n"
+    else:
+        message += "/start - Start the bot and show available commands\n"
 
     return message
 

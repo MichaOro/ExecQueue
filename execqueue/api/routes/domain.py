@@ -50,7 +50,7 @@ class ErrorResponse(BaseModel):
 
 
 @router.post(
-    "/tasks",
+    "/task",
     summary="Create a task",
     operation_id="tasks_create_post",
     tags=["API"],
@@ -78,7 +78,7 @@ async def create_task_endpoint(
 
 
 @router.get(
-    "/tasks/{task_number}/status",
+    "/task/{task_number}/status",
     summary="Get task status",
     operation_id="tasks_status_get",
     tags=["API"],

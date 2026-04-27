@@ -43,7 +43,7 @@ def task_api_client():
 
 def test_create_task_returns_public_task_number_and_backlog_status(task_api_client):
     response = task_api_client.post(
-        "/api/tasks",
+        "/api/task",
         json={
             "prompt": "Summarize the deployment checklist",
             "type": "task",
@@ -61,7 +61,7 @@ def test_create_task_returns_public_task_number_and_backlog_status(task_api_clie
 
 def test_create_task_assigns_unique_task_numbers(task_api_client):
     first = task_api_client.post(
-        "/api/tasks",
+        "/api/task",
         json={
             "prompt": "First task",
             "type": "task",
@@ -70,7 +70,7 @@ def test_create_task_assigns_unique_task_numbers(task_api_client):
         },
     )
     second = task_api_client.post(
-        "/api/tasks",
+        "/api/task",
         json={
             "prompt": "Second task",
             "type": "requirement",
@@ -87,7 +87,7 @@ def test_create_task_assigns_unique_task_numbers(task_api_client):
 
 def test_create_task_rejects_invalid_type(task_api_client):
     response = task_api_client.post(
-        "/api/tasks",
+        "/api/task",
         json={
             "prompt": "Should fail",
             "type": "incident",
@@ -101,7 +101,7 @@ def test_create_task_rejects_invalid_type(task_api_client):
 
 def test_get_task_status_returns_current_status(task_api_client):
     created = task_api_client.post(
-        "/api/tasks",
+        "/api/task",
         json={
             "prompt": "Check build logs",
             "type": "task",
@@ -111,7 +111,7 @@ def test_get_task_status_returns_current_status(task_api_client):
     )
 
     response = task_api_client.get(
-        f"/api/tasks/{created.json()['task_number']}/status"
+        f"/api/task/{created.json()['task_number']}/status"
     )
 
     assert response.status_code == 200
@@ -122,7 +122,7 @@ def test_get_task_status_returns_current_status(task_api_client):
 
 
 def test_get_task_status_returns_404_for_unknown_task_number(task_api_client):
-    response = task_api_client.get("/api/tasks/999/status")
+    response = task_api_client.get("/api/task/999/status")
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Task 999 not found."}

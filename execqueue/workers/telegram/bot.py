@@ -1,6 +1,7 @@
 """Telegram bot self-health reporting."""
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from execqueue.workers.telegram.commands import (
     create_start,
     create_task_type,
     get_health_command_message,
+    get_help_message,
     get_start_message,
     status_command,
 )
@@ -58,6 +60,7 @@ except ImportError:
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 HEALTH_FILE = PROJECT_ROOT / "ops" / "health" / "telegram_bot.json"
+PID_FILE = PROJECT_ROOT / "ops" / "pids" / "telegram_bot.pid"
 
 # Conversation states for /create (imported from commands but re-exported here for registration)
 from execqueue.workers.telegram.commands import CREATE_PROMPT, CREATE_TASK_TYPE
@@ -105,11 +108,142 @@ def write_health_status(status: str, detail: str = "", include_pid: bool = False
         logger.error("Failed to write health status: %s", exc)
 
 
+async def _await_if_needed(value: object) -> None:
+    """Await values only when the underlying Telegram client returns a coroutine."""
+    if inspect.isawaitable(value):
+        await value
+
+
+async def _event_is_set(event: asyncio.Event) -> bool:
+    """Support both real asyncio events and mocked async event helpers in tests."""
+    value = event.is_set()
+    if inspect.isawaitable(value):
+        return bool(await value)
+    return bool(value)
+
+
+def write_pid_file(pid: int | None = None) -> None:
+    """Persist the current bot PID for restart orchestration."""
+    pid_value = os.getpid() if pid is None else pid
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(f"{pid_value}\n", encoding="utf-8")
+
+
+def clear_pid_file(expected_pid: int | None = None) -> None:
+    """Remove the PID file when it belongs to the current bot process."""
+    try:
+        recorded_pid = PID_FILE.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return
+    except Exception as exc:
+        logger.warning("Failed to read Telegram bot PID file before cleanup: %s", exc)
+        recorded_pid = ""
+
+    if expected_pid is not None and recorded_pid:
+        try:
+            if int(recorded_pid) != expected_pid:
+                logger.debug(
+                    "Skipping PID file cleanup because it belongs to another process: %s",
+                    recorded_pid,
+                )
+                return
+        except ValueError:
+            logger.warning("Telegram bot PID file contained an invalid PID: %s", recorded_pid)
+
+    try:
+        PID_FILE.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning("Failed to remove Telegram bot PID file: %s", exc)
+
+
+async def stop_bot_application(
+    application: "Application",
+    shutdown_event: asyncio.Event,
+    timeout: int,
+) -> None:
+    """Stop the Telegram application within a bounded timeout."""
+
+    async def _shutdown_steps() -> None:
+        updater = getattr(application, "updater", None)
+        if updater is not None and hasattr(updater, "stop"):
+            await _await_if_needed(updater.stop())
+
+        if hasattr(application, "stop"):
+            await _await_if_needed(application.stop())
+
+        if hasattr(application, "shutdown"):
+            await _await_if_needed(application.shutdown())
+
+    write_health_status("not_ok", "Telegram bot is shutting down.", include_pid=True)
+
+    try:
+        await asyncio.wait_for(_shutdown_steps(), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.error("Telegram bot shutdown timed out after %s seconds.", timeout)
+        write_health_status(
+            "not_ok",
+            f"Telegram bot shutdown timed out after {timeout} seconds.",
+            include_pid=True,
+        )
+    except Exception:
+        logger.exception("Failed to shut down Telegram bot cleanly")
+        write_health_status(
+            "not_ok",
+            "Telegram bot encountered an error during shutdown.",
+            include_pid=True,
+        )
+    finally:
+        clear_pid_file(expected_pid=os.getpid())
+        await _await_if_needed(shutdown_event.set())
+
+
+def create_shutdown_handler(
+    loop: asyncio.AbstractEventLoop,
+    application: "Application",
+    shutdown_event: asyncio.Event,
+    timeout: int,
+):
+    """Create a signal-safe handler that delegates shutdown work to the event loop."""
+    shutdown_task: asyncio.Task[None] | None = None
+
+    def shutdown_handler() -> None:
+        nonlocal shutdown_task
+
+        if shutdown_task is not None and not shutdown_task.done():
+            logger.info("Shutdown already in progress, ignoring duplicate signal.")
+            return
+
+        logger.info("Shutdown signal received, stopping bot...")
+        shutdown_task = loop.create_task(
+            stop_bot_application(
+                application=application,
+                shutdown_event=shutdown_event,
+                timeout=timeout,
+            )
+        )
+
+    return shutdown_handler
+
+
 async def start_command(update: Update, context: "ContextTypes.DEFAULT_TYPE | None") -> None:
     """Handle /start command."""
     persist_message_user(update)
+    telegram_user_id = update.effective_user.id if update.effective_user else None
+    role = None
+    is_active = False
+
+    if telegram_user_id:
+        try:
+            from execqueue.workers.telegram.auth import get_user_info
+
+            role, is_active = get_user_info(telegram_user_id)
+        except Exception:
+            logger.exception("Failed to check user role for start command")
+
     if update.message:
-        await update.message.reply_text(get_start_message())
+        await update.message.reply_text(
+            get_start_message(role=role, is_active=is_active)
+        )
 
 
 async def help_command(update: Update, context: "ContextTypes.DEFAULT_TYPE | None") -> None:
@@ -129,6 +263,12 @@ async def help_command(update: Update, context: "ContextTypes.DEFAULT_TYPE | Non
             role, is_active = get_user_info(telegram_user_id)
         except Exception:
             logger.exception("Failed to check user role for help command")
+
+    await update.message.reply_text(
+        get_help_message(role=role, is_active=is_active),
+        parse_mode="Markdown",
+    )
+    return
 
     # Build help message with role-based commands
     help_message = "📖 *ExecQueue Bot Help*\n\n"
@@ -391,7 +531,11 @@ async def health_reporter(polling_timeout: int) -> None:
     """Periodically update the bot health file."""
     while True:
         try:
-            write_health_status("ok", "Telegram bot is running and polling for updates.")
+            write_health_status(
+                "ok",
+                "Telegram bot is running and polling for updates.",
+                include_pid=True,
+            )
         except Exception as exc:
             logger.error("Health reporter error: %s", exc)
 
@@ -424,7 +568,7 @@ async def run_bot() -> None:
         sys.exit(1)
 
     logger.info("Starting Telegram bot with polling and health reporting...")
-    write_health_status("starting", "Telegram bot is initializing...")
+    write_health_status("starting", "Telegram bot is initializing...", include_pid=True)
 
     application = create_bot_application(
         token=settings.telegram_bot_token,
@@ -432,13 +576,13 @@ async def run_bot() -> None:
     )
 
     loop = asyncio.get_running_loop()
-
-    def shutdown_handler() -> None:
-        """Handle shutdown signals gracefully."""
-        logger.info("Shutdown signal received, stopping bot...")
-        write_health_status("not_ok", "Telegram bot is shutting down.")
-        application.stop()
-        loop.stop()
+    shutdown_event = asyncio.Event()
+    shutdown_handler = create_shutdown_handler(
+        loop=loop,
+        application=application,
+        shutdown_event=shutdown_event,
+        timeout=settings.telegram_shutdown_timeout,
+    )
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -448,30 +592,54 @@ async def run_bot() -> None:
 
     await application.initialize()
     await application.start()
+    write_pid_file()
 
     logger.info("Bot started successfully. Press Ctrl+C to stop.")
+    health_task: asyncio.Task[None] | None = None
 
     try:
-        await send_startup_notification()
-    except Exception:
-        logger.exception("Failed to send startup notification, but bot continues running")
+        try:
+            await send_startup_notification()
+        except Exception:
+            logger.exception("Failed to send startup notification, but bot continues running")
 
-    health_task = asyncio.create_task(health_reporter(settings.telegram_polling_timeout))
+        health_task = asyncio.create_task(health_reporter(settings.telegram_polling_timeout))
 
-    await application.updater.start_polling(
-        timeout=settings.telegram_polling_timeout,
-        allowed_updates=Update.ALL_TYPES,
-    )
-
-    await asyncio.Event().wait()
-
-    health_task.cancel()
-    try:
-        await health_task
+        await application.updater.start_polling(
+            timeout=settings.telegram_polling_timeout,
+            allowed_updates=Update.ALL_TYPES,
+        )
+        write_health_status(
+            "ok",
+            "Telegram bot is running and polling for updates.",
+            include_pid=True,
+        )
+        await shutdown_event.wait()
     except asyncio.CancelledError:
-        pass
+        logger.info("Telegram bot task cancelled, shutting down...")
+        if not await _event_is_set(shutdown_event):
+            await stop_bot_application(
+                application=application,
+                shutdown_event=shutdown_event,
+                timeout=settings.telegram_shutdown_timeout,
+            )
+        raise
+    finally:
+        if health_task is not None:
+            health_task.cancel()
+            try:
+                await health_task
+            except asyncio.CancelledError:
+                pass
 
-    write_health_status("not_ok", "Telegram bot stopped.")
+        if not await _event_is_set(shutdown_event):
+            await stop_bot_application(
+                application=application,
+                shutdown_event=shutdown_event,
+                timeout=settings.telegram_shutdown_timeout,
+            )
+
+        write_health_status("not_ok", "Telegram bot stopped.", include_pid=True)
 
 
 def main() -> None:
@@ -480,11 +648,13 @@ def main() -> None:
         asyncio.run(run_bot())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
-        write_health_status("not_ok", "Telegram bot stopped by user.")
+        write_health_status("not_ok", "Telegram bot stopped by user.", include_pid=True)
     except Exception as exc:
         logger.error("Bot error: %s", exc)
-        write_health_status("not_ok", f"Bot error: {exc}")
+        write_health_status("not_ok", f"Bot error: {exc}", include_pid=True)
         sys.exit(1)
+    finally:
+        clear_pid_file(expected_pid=os.getpid())
 
 
 if __name__ == "__main__":

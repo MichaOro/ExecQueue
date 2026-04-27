@@ -47,6 +47,7 @@ Copy `.env.example` to `.env` and configure:
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_BOT_ENABLED=false
 TELEGRAM_POLLING_TIMEOUT=30
+TELEGRAM_SHUTDOWN_TIMEOUT=8
 ```
 
 #### Installation
@@ -83,6 +84,7 @@ The bot starts polling only when `TELEGRAM_BOT_ENABLED=true` and `TELEGRAM_BOT_T
 
 - `/health` and `/restart` commands return placeholder messages and do not perform any system actions yet.
 - The bot uses long-polling for updates.
+- Shutdown is handled gracefully with a bounded timeout to avoid hanging restarts.
 - Token is never logged or exposed in runtime output.
 
 The `/api` router namespace is reserved for later fachliche endpoints. No

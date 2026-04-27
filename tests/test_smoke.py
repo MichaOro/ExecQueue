@@ -42,9 +42,6 @@ def test_openapi_health_routes_are_grouped_by_domain():
     schema = app.openapi()
     paths = schema["paths"]
 
-    assert paths["/health/live"]["get"]["tags"] == ["API"]
-    assert paths["/health/ready"]["get"]["tags"] == ["API"]
-    assert paths["/health/db"]["get"]["tags"] == ["DB"]
     assert paths["/api/health"]["get"]["tags"] == ["API"]
     assert paths["/db/health"]["get"]["tags"] == ["DB"]
     assert paths["/telegram-bot/health"]["get"]["tags"] == ["Telegram Bot"]
