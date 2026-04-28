@@ -92,8 +92,8 @@ def _execute_restart_script(
     dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "Restart initiated successfully"},
-        403: {"description": "Forbidden - Admin access required"},
-        503: {"description": "Admin token is not configured"},
+        403: {"description": "Forbidden - Admin access required (invalid token or non-admin Telegram user)"},
+        503: {"description": "Admin token is not configured (for external clients)"},
         500: {"description": "Restart failed"},
     },
 )
@@ -114,8 +114,8 @@ async def system_restart() -> dict[str, object]:
     dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "Restart initiated successfully"},
-        403: {"description": "Forbidden - Admin access required"},
-        503: {"description": "Admin token is not configured"},
+        403: {"description": "Forbidden - Admin access required (invalid token or non-admin Telegram user)"},
+        503: {"description": "Admin token is not configured (for external clients)"},
         500: {"description": "Restart failed"},
     },
 )
@@ -136,8 +136,8 @@ async def api_restart() -> dict[str, object]:
     dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "Restart initiated successfully"},
-        403: {"description": "Forbidden - Admin access required"},
-        503: {"description": "Admin token is not configured"},
+        403: {"description": "Forbidden - Admin access required (invalid token or non-admin Telegram user)"},
+        503: {"description": "Admin token is not configured (for external clients)"},
         500: {"description": "Restart failed"},
     },
 )

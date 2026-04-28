@@ -14,6 +14,33 @@ def install_system_admin_token(monkeypatch, token: str = "test-admin-token") -> 
     return {"X-Admin-Token": token}
 
 
+def install_telegram_admin_user(monkeypatch, telegram_id: int = 123456789) -> dict[str, str]:
+    """Set up a mock Telegram admin user in the database for testing."""
+    from unittest.mock import MagicMock
+    
+    # Create a mock admin user
+    mock_user = MagicMock()
+    mock_user.telegram_id = telegram_id
+    mock_user.role = "admin"
+    mock_user.is_active = True
+    
+    # Mock the database query
+    def mock_execute(query):
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        return mock_result
+    
+    # Create a mock session
+    mock_session = MagicMock()
+    mock_session.execute = mock_execute
+    
+    monkeypatch.setattr(
+        "execqueue.api.dependencies.get_session",
+        lambda: iter([mock_session]),
+    )
+    return {"X-Telegram-User-ID": str(telegram_id)}
+
+
 def install_fake_healthchecks(
     monkeypatch,
     *,
@@ -279,6 +306,103 @@ class TestSystemRestartAuthorization:
         response = TestClient(app).post("/restart", headers={"X-Admin-Token": "wrong-token"})
 
         assert response.status_code == 403
+
+    def test_restart_accepts_telegram_admin_user(self, monkeypatch, tmp_path):
+        """Telegram admin users should be able to restart without token."""
+        from execqueue.api.routes import system
+        from unittest.mock import MagicMock, patch
+        
+        # Create a mock admin user
+        mock_user = MagicMock()
+        mock_user.telegram_id = 123456789
+        mock_user.role = "admin"
+        mock_user.is_active = True
+        
+        # Mock the session's execute method
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar_one_or_none.return_value = mock_user
+        mock_session.close = MagicMock()
+        
+        script_path = tmp_path / "global_restart.sh"
+        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        class FakeProcess:
+            pid = 12348
+
+        monkeypatch.setattr(system, "RESTART_SCRIPT", script_path)
+        monkeypatch.setattr(system.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+        
+        # Patch create_session where it's used
+        with patch("execqueue.api.dependencies.create_session", return_value=mock_session):
+            response = TestClient(app).post("/restart", headers={"X-Telegram-User-ID": "123456789"})
+
+        assert response.status_code == 200
+        assert response.json()["pid"] == 12348
+
+    def test_restart_rejects_non_admin_telegram_user(self, monkeypatch):
+        """Non-admin Telegram users should be rejected."""
+        from unittest.mock import MagicMock, patch
+        
+        # Create a mock non-admin user
+        mock_user = MagicMock()
+        mock_user.telegram_id = 987654321
+        mock_user.role = "user"
+        mock_user.is_active = True
+        
+        # Mock the session's execute method
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar_one_or_none.return_value = mock_user
+        mock_session.close = MagicMock()
+        
+        # Patch create_session where it's used
+        with patch("execqueue.api.dependencies.create_session", return_value=mock_session):
+            response = TestClient(app).post("/restart", headers={"X-Telegram-User-ID": "987654321"})
+
+        assert response.status_code == 403
+        assert "Admin role required" in response.json()["detail"]
+
+    def test_restart_rejects_inactive_telegram_user(self, monkeypatch):
+        """Inactive Telegram users should be rejected."""
+        from unittest.mock import MagicMock, patch
+        
+        # Create a mock inactive user
+        mock_user = MagicMock()
+        mock_user.telegram_id = 987654321
+        mock_user.role = "admin"
+        mock_user.is_active = False
+        
+        # Mock the session's execute method
+        mock_session = MagicMock()
+        mock_session.execute.return_value.scalar_one_or_none.return_value = mock_user
+        mock_session.close = MagicMock()
+        
+        # Patch create_session where it's used
+        with patch("execqueue.api.dependencies.create_session", return_value=mock_session):
+            response = TestClient(app).post("/restart", headers={"X-Telegram-User-ID": "987654321"})
+
+        assert response.status_code == 403
+        assert "not active" in response.json()["detail"]
+
+    def test_restart_rejects_unknown_telegram_user(self, monkeypatch):
+        """Unknown Telegram users should be rejected."""
+        from unittest.mock import MagicMock
+        
+        def mock_execute(query):
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = None
+            return mock_result
+        
+        mock_session = MagicMock()
+        mock_session.execute = mock_execute
+        
+        from execqueue.api.dependencies import get_session
+        import unittest.mock
+        
+        with unittest.mock.patch.object(get_session, '__call__', return_value=iter([mock_session])):
+            response = TestClient(app).post("/restart", headers={"X-Telegram-User-ID": "999999999"})
+
+        assert response.status_code == 403
+        assert "not found" in response.json()["detail"]
 
 
 class TestComponentHealthEndpoints:

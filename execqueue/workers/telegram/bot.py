@@ -315,7 +315,7 @@ async def restart_command(
         return
 
     await update.message.reply_text(
-        "*System-Neustart wird vorbereitet...*\n\n"
+        "🔄 *System-Neustart wird vorbereitet...*\n\n"
         "Sende Anfrage an API. Dies kann einen Moment dauern.",
         parse_mode="Markdown"
     )
@@ -323,7 +323,7 @@ async def restart_command(
     from execqueue.workers.telegram.commands import trigger_system_restart
 
     try:
-        success, message = await trigger_system_restart()
+        success, message = await trigger_system_restart(telegram_user_id)
 
         if success:
             await update.message.reply_text(
@@ -332,7 +332,7 @@ async def restart_command(
             )
         else:
             await update.message.reply_text(
-                f"*Neustart fehlgeschlagen*\n\n{message}",
+                f"❌ *Neustart fehlgeschlagen*\n\n{message}",
                 parse_mode="Markdown"
             )
     except Exception:

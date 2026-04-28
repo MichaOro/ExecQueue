@@ -88,6 +88,6 @@ main() {
     log "Global restart completed successfully."
     log_to_file "Global restart completed successfully."
     exit 0
-
+}
 
 main "$@"

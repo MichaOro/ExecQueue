@@ -45,16 +45,26 @@ def get_operator_start_command_list() -> list[dict[str, str]]:
     ]
 
 
-async def trigger_system_restart() -> tuple[bool, str]:
-    """Trigger system restart via API."""
+async def trigger_system_restart(user_telegram_id: int | None = None) -> tuple[bool, str]:
+    """Trigger system restart via API.
+    
+    Args:
+        user_telegram_id: The Telegram user ID of the requesting admin.
+    """
     settings = get_settings()
     url = f"http://{settings.execqueue_api_host}:{settings.execqueue_api_port}/restart"
     headers: dict[str, str] = {}
 
-    if not settings.system_admin_token:
-        return False, "System-Neustart ist nicht konfiguriert; SYSTEM_ADMIN_TOKEN fehlt."
-
-    headers["X-Admin-Token"] = settings.system_admin_token
+    # Authentication handling
+    if user_telegram_id is not None:
+        # Prefer Telegram user ID authentication when provided
+        headers["X-Telegram-User-ID"] = str(user_telegram_id)
+    else:
+        # Fall back to admin token authentication
+        token = settings.system_admin_token
+        if not token:
+            return False, "system_admin_token is not configured"
+        headers["X-Admin-Token"] = token
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:

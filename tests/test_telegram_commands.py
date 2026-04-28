@@ -203,37 +203,64 @@ class TestRestartCommand:
                 mock_restart.return_value = (True, "System restarted")
                 await restart_command(update, context)
 
-        mock_restart.assert_called_once()
+        mock_restart.assert_called_once_with(123)
         assert update.message.reply_text.call_count >= 2
 
 
 class TestRestartFunctions:
     @pytest.mark.asyncio
-    async def test_trigger_system_restart_requires_admin_token(self):
+    async def test_trigger_system_restart_sends_telegram_user_id(self):
         with patch("execqueue.workers.telegram.commands.get_settings") as mock_settings:
             mock_settings.return_value.execqueue_api_host = "127.0.0.1"
             mock_settings.return_value.execqueue_api_port = 8000
-            mock_settings.return_value.system_admin_token = None
-
-            success, message = await trigger_system_restart()
-
-        assert success is False
-        assert "system_admin_token" in message.lower()
-
-    @pytest.mark.asyncio
-    async def test_trigger_system_restart_posts_to_api(self):
-        with patch("execqueue.workers.telegram.commands.get_settings") as mock_settings:
-            mock_settings.return_value.execqueue_api_host = "127.0.0.1"
-            mock_settings.return_value.execqueue_api_port = 8000
-            mock_settings.return_value.system_admin_token = "test-admin-token"
 
             with patch("execqueue.workers.telegram.commands.httpx.AsyncClient") as mock_client:
                 mock_response = MagicMock()
                 mock_response.status_code = 200
-                mock_response.json.return_value = {"message": "OK"}
+                mock_response.json.return_value = {"message": "System restarted"}
                 mock_client.return_value.__aenter__.return_value.post.return_value = mock_response
 
-                success, message = await trigger_system_restart()
+                success, message = await trigger_system_restart(user_telegram_id=123456789)
 
+        # Verify the correct header was sent
+        call_args = mock_client.return_value.__aenter__.return_value.post.call_args
+        assert call_args[1]["headers"]["X-Telegram-User-ID"] == "123456789"
+        assert "X-Admin-Token" not in call_args[1]["headers"]
+        
         assert success is True
-        assert message == "OK"
+        assert message == "System restarted"
+
+    @pytest.mark.asyncio
+    async def test_trigger_system_restart_handles_api_error(self):
+        with patch("execqueue.workers.telegram.commands.get_settings") as mock_settings:
+            mock_settings.return_value.execqueue_api_host = "127.0.0.1"
+            mock_settings.return_value.execqueue_api_port = 8000
+
+            with patch("execqueue.workers.telegram.commands.httpx.AsyncClient") as mock_client:
+                mock_response = MagicMock()
+                mock_response.status_code = 403
+                mock_response.json.return_value = {"detail": "Admin access required"}
+                mock_client.return_value.__aenter__.return_value.post.return_value = mock_response
+
+                success, message = await trigger_system_restart(user_telegram_id=123456789)
+
+        assert success is False
+        assert "Admin access required" in message
+
+    @pytest.mark.asyncio
+    async def test_trigger_system_restart_handles_timeout(self):
+        import httpx
+        
+        with patch("execqueue.workers.telegram.commands.get_settings") as mock_settings:
+            mock_settings.return_value.execqueue_api_host = "127.0.0.1"
+            mock_settings.return_value.execqueue_api_port = 8000
+
+            with patch("execqueue.workers.telegram.commands.httpx.AsyncClient") as mock_client:
+                mock_client.return_value.__aenter__.return_value.post.side_effect = httpx.TimeoutException(
+                    message="Request timed out", request=MagicMock()
+                )
+
+                success, message = await trigger_system_restart(user_telegram_id=123456789)
+
+        assert success is False
+        assert "timed out" in message.lower()
