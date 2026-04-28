@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TASK_MAX_RETRIES = 3
 
 # Executable task types that can be persisted to the database
-ALLOWED_TASK_TYPES = frozenset({"planning", "execution", "analysis"})
+ALLOWED_TASK_TYPES = frozenset({"planning", "execution", "analysis", "requirement"})
 
 # Intake types that can be submitted via the API
 ALLOWED_INTAKE_TYPES = frozenset({"requirement", "planning", "execution", "analysis"})
@@ -68,9 +68,9 @@ def validate_task_type(task_type: str) -> str:
             f"Allowed intake types: {', '.join(sorted(ALLOWED_INTAKE_TYPES))}"
         )
 
-    # Map 'requirement' to 'planning' since requirements are not executable
+    # Map 'requirement' intake to 'requirement' task type (not planning anymore)
     if task_type == "requirement":
-        return "planning"
+        return "requirement"
 
     return task_type
 

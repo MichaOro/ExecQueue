@@ -57,7 +57,7 @@ class TaskClassifier:
         Args:
             task_id: Task UUID
             task_number: Public task number
-            task_type: Task type (planning, execution, analysis)
+            task_type: Task type (planning, execution, analysis, requirement)
             details: Task details JSON
             
         Returns:
@@ -66,13 +66,39 @@ class TaskClassifier:
         details = details or {}
         reasons = []
         
-        # Determine requires_write_access
-        # Default: True (conservative - missing means write)
-        requires_write = details.get(self._write_access_field, True)
+        # Determine requires_write_access based on task_type (smart defaults)
+        if task_type == "execution":
+            # Execution tasks always require write access
+            requires_write = True
+            reasons.append("execution type requires write access")
+        elif task_type in ("planning", "analysis"):
+            # Planning and Analysis are read-only by default
+            # They may produce documentation, but that's committed later (not during preparation)
+            requires_write = False
+            reasons.append(f"{task_type} type is read-only by default")
+        elif task_type == "requirement":
+            # Requirement tasks: check explicit setting or LLM decision
+            # Default: read-only (LLM can override via details)
+            if self._write_access_field in details:
+                requires_write = details[self._write_access_field]
+                reasons.append(f"requirement type with explicit requires_write_access={requires_write}")
+            else:
+                requires_write = False
+                reasons.append("requirement type - no explicit setting (default: read-only)")
+        else:
+            # Unknown task type: conservative default (write)
+            requires_write = True
+            reasons.append(f"unknown task type '{task_type}' - conservative default: write")
+        
+        # Allow override via explicit setting (always takes precedence)
+        if self._write_access_field in details:
+            requires_write = details[self._write_access_field]
+            reasons.append(f"explicit override: requires_write_access={requires_write}")
+        
         if requires_write is True:
-            reasons.append("requires_write_access default=True")
-        elif requires_write is False:
-            reasons.append("requires_write_access=False explicitly set")
+            reasons.append("final decision: requires write access")
+        else:
+            reasons.append("final decision: read-only")
         
         # Determine parallelization_mode
         # Default: sequential (conservative)

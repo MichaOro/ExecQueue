@@ -18,12 +18,18 @@ from enum import Enum
 class ExecutionStatus(str, Enum):
     """Execution run states.
 
-    Tracks the runtime state of a task execution instance.
+    Tracks the runtime state of a task execution instance with granular
+    status values for REQ-012 runner lifecycle.
     """
 
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
+    PREPARED = "prepared"
+    QUEUED = "queued"
+    DISPATCHING = "dispatching"
+    IN_PROGRESS = "in_progress"
+    RESULT_INSPECTION = "result_inspection"
+    ADOPTING_COMMIT = "adopting_commit"
+    REVIEW = "review"
+    DONE = "done"
     FAILED = "failed"
 
 
@@ -49,3 +55,21 @@ class EventType(str, Enum):
     COMPLETED = "completed"
     ERROR = "error"
     STATUS_UPDATE = "status_update"
+    EXECUTION_CLAIMED = "execution.claimed"
+    EXECUTION_DISPATCHED = "execution.dispatched"
+    EXECUTION_STARTED = "execution.started"
+    EXECUTION_COMPLETED = "execution.completed"
+    EXECUTION_FAILED = "execution.failed"
+    SESSION_CREATED = "session.created"
+    SESSION_CLOSED = "session.closed"
+    MESSAGE_SENT = "message.sent"
+    MESSAGE_RECEIVED = "message.received"
+    STREAM_CONNECTED = "stream.connected"
+    STREAM_DISCONNECTED = "stream.disconnected"
+    STREAM_HEARTBEAT = "stream.heartbeat"
+    RESULT_INSPECTED = "result.inspected"
+    COMMIT_ADOPTION_STARTED = "commit.adoption_started"
+    COMMIT_ADOPTION_SUCCESS = "commit.adoption_success"
+    COMMIT_ADOPTION_CONFLICT = "commit.adoption_conflict"
+    RETRY_SCHEDULED = "retry.scheduled"
+    RETRY_EXHAUSTED = "retry.exhausted"

@@ -297,6 +297,42 @@ class TestTelegramBotRestartEndpoint:
         assert response.status_code == 200
 
 
+class TestOpenCodeRestartEndpoint:
+    def test_opencode_restart_endpoint_exists(self, monkeypatch, tmp_path):
+        from execqueue.api.routes import system
+
+        headers = install_system_admin_token(monkeypatch)
+        script_path = tmp_path / "opencode_restart.sh"
+        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+        class FakeProcess:
+            pid = 12349
+
+        monkeypatch.setattr(system, "OPCODE_RESTART_SCRIPT", script_path)
+        monkeypatch.setattr(system.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+        response = TestClient(app).post("/opencode/restart", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "initiated"
+        assert response.json()["pid"] == 12349
+
+    def test_opencode_restart_script_not_found(self, monkeypatch):
+        from execqueue.api.routes import system
+
+        headers = install_system_admin_token(monkeypatch)
+
+        class FakePath:
+            def exists(self):
+                return False
+
+        monkeypatch.setattr(system, "OPCODE_RESTART_SCRIPT", FakePath())
+        response = TestClient(app).post("/opencode/restart", headers=headers)
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Restart script not found."
+
+
 class TestSystemRestartAuthorization:
     def test_restart_requires_admin_token(self):
         assert TestClient(app).post("/restart").status_code in {403, 503}

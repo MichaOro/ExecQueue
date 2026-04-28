@@ -49,7 +49,6 @@ repeat
         endif
 
       else (nein)
-        :Task für parallelen Read-only-Batch vormerken;
       endif
 
       :Task für atomaren Lock vormerken;
@@ -86,57 +85,104 @@ repeat
         :Keine Worktree-Isolation notwendig;
       endif
 
-      :Task Execution erzeugen;
-      :Execution Runner erzeugen;
-      :Runner-ID speichern;
+      :Task Runner initialisieren;
+      :OpenCode Session erzeugen;
+      :session_id persistieren;
+      :OpenCode Mode setzen;
 
       if (Task benötigt Schreibzugriff?) then (ja)
-        :Runner mit Worktree-Kontext vorbereiten;
+        :Worktree-Kontext einbinden;
       else (nein)
-        :Runner mit read-only Kontext vorbereiten;
       endif
 
-      :OpenCode Serve Session starten;
-      :Task Prompt versenden;
       :Task Status = in_progress;
 
-      :OpenCode führt Task aus;
-      :OpenCode Serve Responses / Events speichern;
+      repeat
 
-      if (Ausführung erfolgreich?) then (ja)
+        :Task durch OpenCode ausführen;
 
-        if (Task type = planning?) then (ja)
-          :Execution Plan speichern;
-          :Arbeitspakete als Tasks erzeugen;
-          :Dependencies + order_index speichern;
-          :Neue Tasks Status = backlog;
-          :Requirement Status = ready_for_execution;
+        if (Logging aktiviert?) then (ja)
+          :Logs persistieren;
         endif
 
-        if (Task type = analysis?) then (ja)
-          :Analyseergebnis speichern;
-          :Befund / Ursache / Handlungsoptionen dokumentieren;
-          :Empfohlene Folgeaktivitäten ableiten;
-        endif
+        :Runner-Ergebnis bewerten;
 
-        if (Task type = execution?) then (ja)
-          :Ausführungsergebnis speichern;
-        endif
+        if (Ausführung erfolgreich?) then (ja)
 
-        if (Code geändert?) then (ja)
-          :Commit im Task-Worktree erzeugen;
-          :commit_sha_after speichern;
-          :Task Status = review;
+          :Result speichern;
+
+          if (Task benötigt Schreibzugriff?) then (ja)
+
+            :Worktree Diff prüfen;
+
+            if (Worktree-Änderungen vorhanden?) then (ja)
+              :Validierung ausführen\n(Build / Tests / Lint);
+
+              if (Validierung erfolgreich?) then (ja)
+
+                repeat
+
+                  :Commit im Task-Worktree prüfen;
+
+
+
+                  :commit_sha persistieren;
+                  :Diff / Commit-Metadaten speichern;
+
+                  :Commit in Ziel-Branch übernehmen;
+                  :Ziel-Branch Commit validieren;
+
+                  if (Ziel-Branch Commit erfolgreich?) then (ja)
+                    :target_commit_sha persistieren;
+                    :Task Status = review;
+                  else (nein)
+                    :Commit-Transfer-Fehler speichern;
+
+                    if (Max Commit Retry Count erreicht?) then (ja)
+                      :Task Status = failed;
+                    else (nein)
+                      :Commit Retry Count erhöhen;
+                      :Task bleibt in_progress;
+                    endif
+
+                  endif
+
+                repeat while (Task Status = in_progress\nund Commit Retry Count nicht erreicht?) is (ja)
+
+              else (nein)
+                :Validierungsfehler speichern;
+
+                if (Max Validation Retry Count erreicht?) then (ja)
+                  :Task Status = failed;
+                else (nein)
+                  :Validation Retry Count erhöhen;
+                  :Task bleibt in_progress;
+                endif
+
+              endif
+
+            else (nein)
+              :Task Status = done;
+            endif
+
+          else (nein)
+            :Task Status = done;
+          endif
+
         else (nein)
-          :Task Status = done;
+          :Ausführungsfehler speichern;
+
+          if (Max Execution Retry Count erreicht?) then (ja)
+            :Task Status = failed;
+          else (nein)
+            :Execution Retry Count erhöhen;
+            :Task bleibt in_progress;
+          endif
+
         endif
 
-      else (nein)
-        :Fehler speichern;
-        :Task Status = failed;
-      endif
+      repeat while (Task Status = in_progress\nund Retry Count nicht erreicht?) is (ja)
 
-      :Task Execution finalisieren;
       :Runner abschließen;
 
       if (Task benötigt Schreibzugriff?) then (ja)

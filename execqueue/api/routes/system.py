@@ -21,6 +21,7 @@ LOGS_DIR = Path(__file__).parent.parent.parent.parent / "ops" / "logs"
 RESTART_SCRIPT = SCRIPTS_DIR / "global_restart.sh"
 API_RESTART_SCRIPT = SCRIPTS_DIR / "api_restart.sh"
 TELEGRAM_RESTART_SCRIPT = SCRIPTS_DIR / "telegram_restart.sh"
+OPCODE_RESTART_SCRIPT = SCRIPTS_DIR / "opencode_restart.sh"
 
 
 def _execute_restart_script(
@@ -147,4 +148,26 @@ async def telegram_bot_restart() -> dict[str, object]:
         script_path=TELEGRAM_RESTART_SCRIPT,
         service_name="Telegram Bot",
         log_filename="telegram_restart_requests.log",
+    )
+
+
+@router.post(
+    "/opencode/restart",
+    summary="Restart OpenCode server instance only",
+    operation_id="opencode_restart_post",
+    tags=["OpenCode"],
+    dependencies=[Depends(require_system_admin)],
+    responses={
+        200: {"description": "Restart initiated successfully"},
+        403: {"description": "Forbidden - Admin access required (invalid token or non-admin Telegram user)"},
+        503: {"description": "Admin token is not configured (for external clients)"},
+        500: {"description": "Restart failed"},
+    },
+)
+async def opencode_restart() -> dict[str, object]:
+    """Restart the OpenCode server instance only."""
+    return _execute_restart_script(
+        script_path=OPCODE_RESTART_SCRIPT,
+        service_name="OpenCode",
+        log_filename="opencode_restart_requests.log",
     )

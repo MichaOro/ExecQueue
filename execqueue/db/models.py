@@ -45,15 +45,12 @@ class TaskCreatedByType(str, Enum):
 
 
 class TaskType(str, Enum):
-    """Supported executable task types.
-
-    Note: 'requirement' is an intake type but NOT an executable task type.
-    Requirements are mapped to 'planning' tasks during intake validation.
-    """
+    """Supported executable task types."""
 
     PLANNING = "planning"
     EXECUTION = "execution"
     ANALYSIS = "analysis"
+    REQUIREMENT = "requirement"
 
 
 class RequirementStatus(str, Enum):
@@ -204,12 +201,8 @@ class Task(Base):
             name="ck_task_created_by_type_allowed",
         ),
         CheckConstraint(
-            "type IN ('planning', 'execution', 'analysis')",
+            "type IN ('planning', 'execution', 'analysis', 'requirement')",
             name="ck_task_type_allowed",
-        ),
-        CheckConstraint(
-            "status IN ('backlog', 'queued', 'prepared', 'failed')",
-            name="ck_task_status_allowed",
         ),
     )
 
@@ -307,6 +300,12 @@ class Task(Base):
     batch_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
+    )
+    allow_parallel_execution: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
