@@ -11,6 +11,9 @@ CHECK_SEPARATOR = "\u2501" * 20
 INCOMPLETE_COMPONENT_DETAIL = "Component health data is incomplete."
 MISSING_STATUS_DETAIL = "Component health data is incomplete: missing status."
 
+# Components that are optional and should not affect core system status
+OPTIONAL_COMPONENTS = frozenset({"opencode"})
+
 
 def _derive_component_name(check: Callable[[], object], fallback_index: int) -> str:
     """Infer a stable component name from a health-check callable."""
@@ -74,8 +77,28 @@ def normalize_health_component(component: object, fallback_name: str) -> HealthC
     )
 
 
-def aggregate_system_status(components: Iterable[object]) -> HealthStatus:
-    """Aggregate component statuses into overall system status."""
+def _is_optional_component(component_name: str) -> bool:
+    """Check if a component is optional and should not affect core system status."""
+    return component_name.lower() in OPTIONAL_COMPONENTS
+
+
+def aggregate_system_status(
+    components: Iterable[object], exclude_optional: bool = True
+) -> HealthStatus:
+    """Aggregate component statuses into overall system status.
+    
+    By default, optional components (like OpenCode) are excluded from the
+    core system status calculation. This ensures that optional integrations
+    do not degrade the core system health.
+    
+    Args:
+        components: Iterable of health check results or component data.
+        exclude_optional: If True, optional components are excluded from
+            the aggregation. Set to False to include all components.
+    
+    Returns:
+        HealthStatus representing the aggregated system status.
+    """
     normalized_components = [
         normalize_health_component(component, fallback_name=f"component_{index}")
         for index, component in enumerate(components, start=1)
@@ -84,10 +107,23 @@ def aggregate_system_status(components: Iterable[object]) -> HealthStatus:
     if not normalized_components:
         return HealthStatus.ERROR
 
-    if any(component.status == HealthStatus.ERROR for component in normalized_components):
+    # Filter out optional components if exclude_optional is True
+    if exclude_optional:
+        core_components = [
+            c for c in normalized_components
+            if not _is_optional_component(c.component)
+        ]
+    else:
+        core_components = normalized_components
+
+    if not core_components:
+        # If all components are optional, return OK as safe default
+        return HealthStatus.OK
+
+    if any(component.status == HealthStatus.ERROR for component in core_components):
         return HealthStatus.ERROR
 
-    if any(component.status == HealthStatus.DEGRADED for component in normalized_components):
+    if any(component.status == HealthStatus.DEGRADED for component in core_components):
         return HealthStatus.DEGRADED
 
     return HealthStatus.OK
@@ -129,7 +165,7 @@ def format_component_name(component_name: str) -> str:
         "api": "API",
         "database": "Database",
         "telegram_bot": "Telegram Bot",
-        "acp": "ACP",
+        "opencode": "OpenCode",
     }
     return aliases.get(component_name, component_name.replace("_", " ").title())
 

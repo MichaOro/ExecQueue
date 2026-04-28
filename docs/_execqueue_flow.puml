@@ -1,0 +1,108 @@
+@startuml
+title ExecQueue – Vereinheitlichter event-getriebener Task Flow
+
+start
+
+:Artefakt wird erfasst;
+
+if (Artefakt-Typ gültig?) then (ja)
+
+  if (Requirement?) then (ja)
+    :task_type = requirement;
+  elseif (Direkter Task?) then (ja)
+    :task_type = execution;
+  elseif (Planning Task?) then (ja)
+    :task_type = planning;
+  elseif (Analyse Task?) then (ja)
+    :task_type = analysis;
+  endif
+
+  :Task erzeugen;
+  :Task Status = backlog;
+  :Task speichern;
+
+else (nein)
+  :Artefakt ablehnen;
+  :Fehler / Validierungsstatus speichern;
+  stop
+endif
+
+:Orchestrator-Trigger auslösen;
+
+repeat
+  :Orchestrator wird aktiviert;
+  :Orchestrator prüft ausführbare Tasks;
+
+  if (Ausführbarer Task vorhanden?) then (ja)
+    :Task atomar locken;
+    :Task Status = in_progress;
+
+    :Task Execution erzeugen;
+    :Execution Runner erzeugen;
+    :Runner-ID speichern;
+
+    if (Task benötigt Schreibzugriff?) then (ja)
+      :Git Branch erzeugen;
+      :Git Worktree erzeugen;
+      :Worktree / Branch in task_execution speichern;
+      :OpenCode ACP Session im Worktree starten;
+    else (nein)
+      :OpenCode ACP Session read-only starten;
+    endif
+
+    :Task Prompt an OpenCode via ACP senden;
+    :OpenCode führt Task aus;
+    :ACP Responses / Events speichern;
+
+    if (Ausführung erfolgreich?) then (ja)
+
+      if (Task type = planning?) then (ja)
+        :Execution Plan speichern;
+        :Arbeitspakete als Tasks erzeugen;
+        :Dependencies + order_index speichern;
+        :Neue Tasks Status = backlog;
+        :Requirement Status = ready_for_execution;
+      endif
+
+      if (Task type = analysis?) then (ja)
+        :Analyseergebnis speichern;
+        :Befund / Ursache / Handlungsoptionen dokumentieren;
+        :Empfohlene Folgeaktivitäten ableiten;
+      endif
+
+      if (Task type = execution?) then (ja)
+        :Ausführungsergebnis speichern;
+      endif
+
+      if (Code geändert?) then (ja)
+        :Commit erzeugen;
+        :commit_sha_after speichern;
+        :Task Status = review;
+      else (nein)
+        :Task Status = done;
+      endif
+
+    else (nein)
+      :Fehler speichern;
+      :Task Status = failed;
+    endif
+
+    :Task Execution finalisieren;
+    :Runner abschließen;
+
+    :Abhängigkeiten und aggregierte Status aktualisieren;
+
+    :Orchestrator-Trigger auslösen;
+
+  else (nein)
+    :Keine aktuell ausführbaren Tasks;
+  endif
+
+repeat while (Weitere ausführbare Tasks vorhanden?) is (ja)
+
+:Orchestrator-Lauf beenden;
+:Orchestrator bleibt idle bis zum nächsten Trigger;
+
+stop
+
+@enduml

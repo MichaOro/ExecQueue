@@ -42,42 +42,45 @@ main() {
     # Define PROJECT_ROOT
     PROJECT_ROOT="$(cd "${OPS_DIR}/.." && pwd)"
 
-    # Load environment to check ACP_ENABLED
-    if [[ -f "${PROJECT_ROOT}/.env" ]]; then
-        set -a
-        source "${PROJECT_ROOT}/.env"
-        set +a
-    fi
-
-    # Build steps dynamically based on ACP configuration
+    # Build static restart steps - API, Telegram Bot, OpenCode Serve
     local steps=()
     local names=()
 
-    # Always restart API
+    # API restart
     steps+=("${SCRIPT_DIR}/api_restart.sh")
     names+=("api_restart")
 
-    # Always restart Telegram Bot
+    # Telegram Bot restart
     steps+=("${SCRIPT_DIR}/telegram_restart.sh")
     names+=("telegram_restart")
 
-    # Optionally restart ACP if enabled
-    case "${ACP_ENABLED:-false}" in
-        1|true|yes|on)
-            steps+=("${SCRIPT_DIR}/acp_restart.sh")
-            names+=("acp_restart")
-            log "ACP is enabled, will include ACP restart in global restart."
-            ;;
-        *)
-            log "ACP is disabled, skipping ACP restart in global restart."
-            ;;
-    esac
+    # OpenCode Serve restart
+    steps+=("${SCRIPT_DIR}/opencode_restart.sh")
+    names+=("opencode_restart")
+
+    # If arguments are passed, filter steps to those names
+    local selected_steps=()
+    local selected_names=()
+    if [[ "$#" -gt 0 ]]; then
+        for arg in "$@"; do
+            for i in "${!names[@]}"; do
+                if [[ "${names[$i]}" == "$arg" ]]; then
+                    selected_steps+=("${steps[$i]}")
+                    selected_names+=("${names[$i]}")
+                fi
+            done
+        done
+        # If no matching args, keep empty (will do nothing)
+    else
+        selected_steps=("${steps[@]}")
+        selected_names=("${names[@]}")
+    fi
 
     local i
-    for ((i = 0; i < ${#steps[@]}; i++)); do
-        if ! run_step "${names[$i]}" "${steps[$i]}"; then
-            log "Global restart aborted at step: ${names[$i]}"
-            log_to_file "Global restart aborted at step: ${names[$i]}"
+    for ((i = 0; i < ${#selected_steps[@]}; i++)); do
+        if ! run_step "${selected_names[$i]}" "${selected_steps[$i]}"; then
+            log "Global restart aborted at step: ${selected_names[$i]}"
+            log_to_file "Global restart aborted at step: ${selected_names[$i]}"
             exit 1
         fi
     done
@@ -85,6 +88,6 @@ main() {
     log "Global restart completed successfully."
     log_to_file "Global restart completed successfully."
     exit 0
-}
+
 
 main "$@"

@@ -284,11 +284,6 @@ async def restart_command(
     update: Update, context: "ContextTypes.DEFAULT_TYPE | None"
 ) -> None:
     """Handle /restart command - Admin only.
-    
-    Supports:
-    - /restart - System restart (API + Bot)
-    - /restart acp - ACP restart only
-    - /restart all - Full restart (API + Bot + ACP)
     """
     if not update.message:
         return
@@ -310,58 +305,26 @@ async def restart_command(
         )
         return
 
-    # Parse restart type argument
-    restart_type = "system"  # default
     if context and context.args:
-        arg = context.args[0].lower()
-        if arg in ("acp", "all"):
-            restart_type = arg
-        else:
-            await update.message.reply_text(
-                "*Ungueltiger Parameter*\n\n"
-                "Verfuegbare Optionen:\n"
-                "/restart - System neu starten (API + Bot)\n"
-                "/restart acp - ACP neu starten\n"
-                "/restart all - Alle Komponenten neu starten",
-                parse_mode="Markdown"
-            )
-            return
+        await update.message.reply_text(
+            "*Ungueltiger Parameter*\n\n"
+            "Verfuegbare Option:\n"
+            "/restart - System neu starten (API + Bot)",
+            parse_mode="Markdown"
+        )
+        return
 
-    # Send confirmation based on restart type
-    if restart_type == "acp":
-        await update.message.reply_text(
-            "*ACP-Neustart wird vorbereitet...*\n\n"
-            "Sende Anfrage an API. Dies kann einen Moment dauern.",
-            parse_mode="Markdown"
-        )
-    elif restart_type == "all":
-        await update.message.reply_text(
-            "*Vollstaendiger Neustart wird vorbereitet...*\n\n"
-            "Sende Anfrage an API. Dies kann einen Moment dauern.",
-            parse_mode="Markdown"
-        )
-    else:
-        await update.message.reply_text(
-            "*System-Neustart wird vorbereitet...*\n\n"
-            "Sende Anfrage an API. Dies kann einen Moment dauern.",
-            parse_mode="Markdown"
-        )
-
-    # Trigger appropriate restart via API (async, don't block)
-    from execqueue.workers.telegram.commands import (
-        trigger_acp_restart,
-        trigger_system_restart,
-        trigger_system_restart_all,
+    await update.message.reply_text(
+        "*System-Neustart wird vorbereitet...*\n\n"
+        "Sende Anfrage an API. Dies kann einen Moment dauern.",
+        parse_mode="Markdown"
     )
 
+    from execqueue.workers.telegram.commands import trigger_system_restart
+
     try:
-        if restart_type == "acp":
-            success, message = await trigger_acp_restart()
-        elif restart_type == "all":
-            success, message = await trigger_system_restart_all()
-        else:
-            success, message = await trigger_system_restart()
-        
+        success, message = await trigger_system_restart()
+
         if success:
             await update.message.reply_text(
                 f"*Neustart erfolgreich ausgeloest*\n\n{message}",

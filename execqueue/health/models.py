@@ -19,6 +19,7 @@ class HealthCheckResult(BaseModel):
     component: str
     status: HealthStatus
     detail: str | None = None
+    state: str | None = None
 
 
 class HealthSummary(BaseModel):

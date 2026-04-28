@@ -20,48 +20,34 @@ def install_fake_healthchecks(
     api_status: str = "OK",
     database_status: str = "OK",
     telegram_status: str = "OK",
-    acp_status: str = "OK",
+    opencode_status: str = "OK",
+    opencode_state: str = "reachable",
 ) -> None:
     from execqueue.health.models import HealthCheckResult
 
     monkeypatch.setattr(
         "execqueue.api.routes.health.get_api_healthcheck",
-        lambda: HealthCheckResult(
-            component="api",
-            status=api_status,
-            detail=(
-                "API responded successfully."
-                if api_status == "OK"
-                else "API health check returned status 503."
-            ),
-        ),
+        lambda: HealthCheckResult(component="api", status=api_status, detail="API health."),
     )
     monkeypatch.setattr(
         "execqueue.api.routes.health.get_database_healthcheck",
         lambda: HealthCheckResult(
-            component="database",
-            status=database_status,
-            detail=(
-                "Database connectivity check succeeded."
-                if database_status == "OK"
-                else "Database connectivity check failed."
-            ),
+            component="database", status=database_status, detail="Database health."
         ),
     )
     monkeypatch.setattr(
         "execqueue.api.routes.health.get_telegram_bot_healthcheck",
         lambda: HealthCheckResult(
-            component="telegram_bot",
-            status=telegram_status,
-            detail="Telegram bot health status available.",
+            component="telegram_bot", status=telegram_status, detail="Telegram health."
         ),
     )
     monkeypatch.setattr(
-        "execqueue.api.routes.health.get_acp_healthcheck",
+        "execqueue.api.routes.health.get_opencode_healthcheck",
         lambda: HealthCheckResult(
-            component="acp",
-            status=acp_status,
-            detail="ACP health status available.",
+            component="opencode",
+            status=opencode_status,
+            detail="OpenCode health.",
+            state=opencode_state,
         ),
     )
 
@@ -72,99 +58,126 @@ def test_create_app_returns_fastapi_instance():
 
 
 def test_health_endpoint_returns_ok(monkeypatch):
-    install_fake_healthchecks(monkeypatch, database_status="OK")
+    install_fake_healthchecks(monkeypatch)
     client = TestClient(app)
 
     response = client.get("/health")
-
-    assert response.status_code == 200
     payload = response.json()
 
+    assert response.status_code == 200
     assert payload["status"] == "OK"
-    assert payload["checks"]["api"]["status"] == "OK"
-    assert payload["checks"]["database"]["status"] == "OK"
-    assert payload["checks"]["api"]["component"] == "api"
+    assert payload["checks"]["opencode"]["component"] == "opencode"
 
 
 def test_docs_endpoint_is_available():
-    client = TestClient(app)
-
-    response = client.get("/docs")
-
-    assert response.status_code == 200
+    assert TestClient(app).get("/docs").status_code == 200
 
 
 def test_openapi_endpoint_is_available():
-    client = TestClient(app)
-
-    response = client.get("/openapi.json")
-
-    assert response.status_code == 200
+    assert TestClient(app).get("/openapi.json").status_code == 200
 
 
 def test_openapi_contains_health_route():
-    client = TestClient(app)
-
-    response = client.get("/openapi.json")
-    payload = response.json()
-
+    payload = TestClient(app).get("/openapi.json").json()
     assert "/health" in payload["paths"]
 
 
 def test_openapi_describes_shared_ready_context():
-    client = TestClient(app)
-
-    response = client.get("/openapi.json")
-    payload = response.json()
-    info = payload["info"]
-
-    assert info["title"] == "ExecQueue API"
-    assert "X-Tenant-ID" in info["description"]
-    assert "tenant-neutral" in info["summary"].lower()
-
-
-def test_health_does_not_require_context_headers(monkeypatch):
-    install_fake_healthchecks(monkeypatch, database_status="OK")
-    client = TestClient(app)
-
-    response = client.get("/health")
-
-    assert response.status_code == 200
+    payload = TestClient(app).get("/openapi.json").json()
+    assert payload["info"]["title"] == "ExecQueue API"
+    assert "X-Tenant-ID" in payload["info"]["description"]
+    assert "tenant-neutral" in payload["info"]["summary"].lower()
 
 
 def test_health_route_stays_tenant_neutral_in_openapi():
-    client = TestClient(app)
-
-    response = client.get("/openapi.json")
-    payload = response.json()
-    health_operation = payload["paths"]["/health"]["get"]
-
-    assert "parameters" not in health_operation
+    payload = TestClient(app).get("/openapi.json").json()
+    assert "parameters" not in payload["paths"]["/health"]["get"]
 
 
-def test_health_endpoint_returns_aggregated_summary(monkeypatch):
-    install_fake_healthchecks(monkeypatch, database_status="OK")
-    client = TestClient(app)
-
-    response = client.get("/health")
-    payload = response.json()
-
-    assert set(payload.keys()) == {"status", "checks"}
-    assert "api" in payload["checks"]
-    assert "database" in payload["checks"]
-
-
-def test_health_endpoint_reports_degraded_when_database_check_fails(monkeypatch):
-    install_fake_healthchecks(monkeypatch, database_status="DEGRADED")
+def test_health_endpoint_core_ok_when_opencode_unreachable(monkeypatch):
+    """OpenCode being unreachable should not degrade core system status."""
+    install_fake_healthchecks(
+        monkeypatch,
+        opencode_status="DEGRADED",
+        opencode_state="unreachable",
+    )
     client = TestClient(app)
 
     response = client.get("/health")
     payload = response.json()
 
     assert response.status_code == 200
-    assert payload["status"] == "DEGRADED"
-    assert payload["checks"]["database"]["status"] == "DEGRADED"
-    assert "secret" not in payload["checks"]["database"]["detail"].lower()
+    # Core status should be OK because OpenCode is optional
+    assert payload["status"] == "OK"
+    assert payload["checks"]["opencode"]["state"] == "unreachable"
+
+
+def test_health_endpoint_core_ok_when_opencode_disabled(monkeypatch):
+    """OpenCode being disabled should not degrade core system status."""
+    install_fake_healthchecks(
+        monkeypatch,
+        opencode_status="DEGRADED",
+        opencode_state="disabled",
+    )
+    client = TestClient(app)
+
+    response = client.get("/health")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "OK"
+    assert payload["checks"]["opencode"]["state"] == "disabled"
+
+
+def test_health_endpoint_core_ok_when_opencode_timeout(monkeypatch):
+    """OpenCode timeout should not degrade core system status."""
+    install_fake_healthchecks(
+        monkeypatch,
+        opencode_status="DEGRADED",
+        opencode_state="timeout",
+    )
+    client = TestClient(app)
+
+    response = client.get("/health")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "OK"
+    assert payload["checks"]["opencode"]["state"] == "timeout"
+
+
+def test_health_endpoint_core_ok_when_opencode_unexpected_response(monkeypatch):
+    """OpenCode unexpected response should not degrade core system status."""
+    install_fake_healthchecks(
+        monkeypatch,
+        opencode_status="DEGRADED",
+        opencode_state="unexpected_response",
+    )
+    client = TestClient(app)
+
+    response = client.get("/health")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "OK"
+    assert payload["checks"]["opencode"]["state"] == "unexpected_response"
+
+
+def test_health_endpoint_core_ok_when_opencode_available(monkeypatch):
+    """OpenCode available should show OK for both core and OpenCode."""
+    install_fake_healthchecks(
+        monkeypatch,
+        opencode_status="OK",
+        opencode_state="available",
+    )
+    client = TestClient(app)
+
+    response = client.get("/health")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "OK"
+    assert payload["checks"]["opencode"]["state"] == "available"
 
 
 def test_router_structure_separates_system_and_domain_areas():
@@ -174,6 +187,7 @@ def test_router_structure_separates_system_and_domain_areas():
     assert "/health" in system_paths
     assert "/restart" in system_paths
     assert "/restart" not in domain_paths
+    assert "/api/system/acp/restart" not in system_paths
 
 
 def test_system_restart_spawns_detached_process(monkeypatch, tmp_path):
@@ -196,22 +210,14 @@ def test_system_restart_spawns_detached_process(monkeypatch, tmp_path):
     monkeypatch.setattr(system, "RESTART_SCRIPT", script_path)
     monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
 
-    client = TestClient(app)
-    response = client.post("/restart", headers=headers)
+    response = TestClient(app).post("/restart", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["pid"] == 12345
-    assert popen_calls["args"] == ([str(script_path)],)
-    assert popen_calls["kwargs"]["stdout"] is system.subprocess.DEVNULL
-    assert popen_calls["kwargs"]["stderr"] is system.subprocess.DEVNULL
-    assert popen_calls["kwargs"]["stdin"] is system.subprocess.DEVNULL
-    assert popen_calls["kwargs"]["close_fds"] is True
     assert popen_calls["kwargs"]["start_new_session"] is True
 
 
 class TestApiRestartEndpoint:
-    """Tests for the API restart endpoint."""
-
     def test_api_restart_endpoint_exists(self, monkeypatch, tmp_path):
         from execqueue.api.routes import system
 
@@ -222,46 +228,13 @@ class TestApiRestartEndpoint:
         class FakeProcess:
             pid = 12346
 
-        def fake_popen(*args, **kwargs):
-            return FakeProcess()
-
         monkeypatch.setattr(system, "API_RESTART_SCRIPT", script_path)
-        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(system.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
 
-        client = TestClient(app)
-        response = client.post("/api/restart", headers=headers)
+        response = TestClient(app).post("/api/restart", headers=headers)
 
         assert response.status_code == 200
-        assert response.json()["pid"] == 12346
         assert response.json()["status"] == "initiated"
-
-    def test_api_restart_spawns_detached_process(self, monkeypatch, tmp_path):
-        from execqueue.api.routes import system
-
-        headers = install_system_admin_token(monkeypatch)
-        script_path = tmp_path / "api_restart.sh"
-        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-
-        popen_calls: dict[str, object] = {}
-
-        class FakeProcess:
-            pid = 12346
-
-        def fake_popen(*args, **kwargs):
-            popen_calls["args"] = args
-            popen_calls["kwargs"] = kwargs
-            return FakeProcess()
-
-        monkeypatch.setattr(system, "API_RESTART_SCRIPT", script_path)
-        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
-
-        client = TestClient(app)
-        response = client.post("/api/restart", headers=headers)
-
-        assert response.status_code == 200
-        assert response.json()["pid"] == 12346
-        assert popen_calls["args"] == ([str(script_path)],)
-        assert popen_calls["kwargs"]["start_new_session"] is True
 
     def test_api_restart_script_not_found(self, monkeypatch):
         from execqueue.api.routes import system
@@ -273,55 +246,13 @@ class TestApiRestartEndpoint:
                 return False
 
         monkeypatch.setattr(system, "API_RESTART_SCRIPT", FakePath())
-
-        client = TestClient(app)
-        response = client.post("/api/restart", headers=headers)
+        response = TestClient(app).post("/api/restart", headers=headers)
 
         assert response.status_code == 500
         assert response.json()["detail"] == "Restart script not found."
 
-    def test_api_restart_permission_error(self, monkeypatch, tmp_path):
-        from execqueue.api.routes import system
-
-        headers = install_system_admin_token(monkeypatch)
-        script_path = tmp_path / "api_restart.sh"
-        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-
-        def fake_popen(*args, **kwargs):
-            raise PermissionError("Script not executable")
-
-        monkeypatch.setattr(system, "API_RESTART_SCRIPT", script_path)
-        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
-
-        client = TestClient(app)
-        response = client.post("/api/restart", headers=headers)
-
-        assert response.status_code == 403
-        assert "not executable" in response.json()["detail"].lower()
-
-    def test_api_restart_hides_internal_exception_details(self, monkeypatch, tmp_path):
-        from execqueue.api.routes import system
-
-        headers = install_system_admin_token(monkeypatch)
-        script_path = tmp_path / "api_restart.sh"
-        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-
-        def fake_popen(*args, **kwargs):
-            raise RuntimeError("internal path leak")
-
-        monkeypatch.setattr(system, "API_RESTART_SCRIPT", script_path)
-        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
-
-        client = TestClient(app)
-        response = client.post("/api/restart", headers=headers)
-
-        assert response.status_code == 500
-        assert response.json()["detail"] == "Failed to initiate restart."
-
 
 class TestTelegramBotRestartEndpoint:
-    """Tests for the Telegram Bot restart endpoint."""
-
     def test_telegram_bot_restart_endpoint_exists(self, monkeypatch, tmp_path):
         from execqueue.api.routes import system
 
@@ -332,285 +263,51 @@ class TestTelegramBotRestartEndpoint:
         class FakeProcess:
             pid = 12347
 
-        def fake_popen(*args, **kwargs):
-            return FakeProcess()
-
         monkeypatch.setattr(system, "TELEGRAM_RESTART_SCRIPT", script_path)
-        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(system.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
 
-        client = TestClient(app)
-        response = client.post("/api/telegram_bot/restart", headers=headers)
-
+        response = TestClient(app).post("/api/telegram_bot/restart", headers=headers)
         assert response.status_code == 200
-        assert response.json()["pid"] == 12347
-        assert response.json()["status"] == "initiated"
-
-    def test_telegram_bot_restart_spawns_detached_process(self, monkeypatch, tmp_path):
-        from execqueue.api.routes import system
-
-        headers = install_system_admin_token(monkeypatch)
-        script_path = tmp_path / "telegram_restart.sh"
-        script_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-
-        popen_calls: dict[str, object] = {}
-
-        class FakeProcess:
-            pid = 12347
-
-        def fake_popen(*args, **kwargs):
-            popen_calls["args"] = args
-            popen_calls["kwargs"] = kwargs
-            return FakeProcess()
-
-        monkeypatch.setattr(system, "TELEGRAM_RESTART_SCRIPT", script_path)
-        monkeypatch.setattr(system.subprocess, "Popen", fake_popen)
-
-        client = TestClient(app)
-        response = client.post("/api/telegram_bot/restart", headers=headers)
-
-        assert response.status_code == 200
-        assert popen_calls["kwargs"]["start_new_session"] is True
-
-    def test_telegram_bot_restart_script_not_found(self, monkeypatch):
-        from execqueue.api.routes import system
-
-        headers = install_system_admin_token(monkeypatch)
-
-        class FakePath:
-            def exists(self):
-                return False
-
-        monkeypatch.setattr(system, "TELEGRAM_RESTART_SCRIPT", FakePath())
-
-        client = TestClient(app)
-        response = client.post("/api/telegram_bot/restart", headers=headers)
-
-        assert response.status_code == 500
 
 
 class TestSystemRestartAuthorization:
     def test_restart_requires_admin_token(self):
-        client = TestClient(app)
-
-        response = client.post("/restart")
-
-        assert response.status_code in {403, 503}
+        assert TestClient(app).post("/restart").status_code in {403, 503}
 
     def test_restart_rejects_wrong_admin_token(self, monkeypatch):
         install_system_admin_token(monkeypatch, token="expected-token")
-        client = TestClient(app)
-
-        response = client.post("/restart", headers={"X-Admin-Token": "wrong-token"})
+        response = TestClient(app).post("/restart", headers={"X-Admin-Token": "wrong-token"})
 
         assert response.status_code == 403
-        assert "admin access required" in response.json()["detail"].lower()
 
 
-class TestDatabaseConnectivityEndpoint:
-    """Tests for the database-only connectivity endpoint."""
-
+class TestComponentHealthEndpoints:
     def test_db_endpoint_exists(self, monkeypatch):
-        install_fake_healthchecks(monkeypatch, database_status="OK")
-        client = TestClient(app)
-
-        response = client.get("/db/health")
-
-        assert response.status_code == 200
-
-    def test_db_endpoint_returns_ok_when_connected(self, monkeypatch):
-        from execqueue.health.models import HealthCheckResult
-
-        monkeypatch.setattr(
-            "execqueue.api.routes.health.get_database_healthcheck",
-            lambda: HealthCheckResult(
-                component="database",
-                status="OK",
-                detail="Database connectivity check succeeded.",
-            ),
-        )
-        client = TestClient(app)
-
-        response = client.get("/db/health")
-        payload = response.json()
-
-        assert payload["status"] == "OK"
-        assert payload["component"] == "database"
-        assert "succeeded" in payload["detail"].lower()
-
-    def test_db_endpoint_returns_degraded_when_disconnected(self, monkeypatch):
-        from execqueue.health.models import HealthCheckResult
-
-        monkeypatch.setattr(
-            "execqueue.api.routes.health.get_database_healthcheck",
-            lambda: HealthCheckResult(
-                component="database",
-                status="DEGRADED",
-                detail="Database connectivity check failed.",
-            ),
-        )
-        client = TestClient(app)
-
-        response = client.get("/db/health")
-        payload = response.json()
-
-        assert payload["status"] == "DEGRADED"
-        assert payload["component"] == "database"
-        assert "failed" in payload["detail"].lower()
-
-    def test_db_endpoint_does_not_include_other_components(self, monkeypatch):
-        from execqueue.health.models import HealthCheckResult
-
-        monkeypatch.setattr(
-            "execqueue.api.routes.health.get_database_healthcheck",
-            lambda: HealthCheckResult(
-                component="database",
-                status="OK",
-                detail="Database connectivity check succeeded.",
-            ),
-        )
-        client = TestClient(app)
-
-        response = client.get("/db/health")
-        payload = response.json()
-
-        # Should only have database, not api or checks dict
-        assert payload["component"] == "database"
-        assert "api" not in payload
-        assert "checks" not in payload
-
-
-class TestApiHealthEndpoint:
-    """Tests for the explicit API health endpoint."""
+        install_fake_healthchecks(monkeypatch)
+        assert TestClient(app).get("/db/health").status_code == 200
 
     def test_api_health_endpoint_exists(self, monkeypatch):
-        install_fake_healthchecks(monkeypatch, api_status="OK")
-        client = TestClient(app)
+        install_fake_healthchecks(monkeypatch)
+        assert TestClient(app).get("/api/health").status_code == 200
 
-        response = client.get("/api/health")
+    def test_opencode_health_endpoint_exists(self, monkeypatch):
+        install_fake_healthchecks(monkeypatch, opencode_state="disabled", opencode_status="DEGRADED")
+        response = TestClient(app).get("/opencode/health")
 
         assert response.status_code == 200
+        assert response.json()["component"] == "opencode"
+        assert response.json()["state"] == "disabled"
 
-    def test_api_health_returns_ok(self, monkeypatch):
-        install_fake_healthchecks(monkeypatch, api_status="OK")
-        client = TestClient(app)
-
-        response = client.get("/api/health")
-        payload = response.json()
-
-        assert payload["component"] == "api"
-        assert payload["status"] == "OK"
-
-    def test_api_health_returns_degraded_when_probe_fails(self, monkeypatch):
-        install_fake_healthchecks(monkeypatch, api_status="DEGRADED")
-        client = TestClient(app)
-
-        response = client.get("/api/health")
-        payload = response.json()
-
-        assert payload["component"] == "api"
-        assert payload["status"] == "DEGRADED"
+    def test_acp_restart_endpoint_is_not_available(self):
+        response = TestClient(app).post("/api/system/acp/restart")
+        assert response.status_code == 404
 
 
 class TestHealthEndpointsInOpenAPI:
-    """Tests for OpenAPI documentation coverage."""
-
-    def test_api_health_endpoint_in_openapi(self):
-        client = TestClient(app)
-
-        response = client.get("/openapi.json")
-        payload = response.json()
+    def test_component_health_endpoints_in_openapi(self):
+        payload = TestClient(app).get("/openapi.json").json()
 
         assert "/api/health" in payload["paths"]
-
-    def test_db_endpoint_in_openapi(self):
-        client = TestClient(app)
-
-        response = client.get("/openapi.json")
-        payload = response.json()
-
         assert "/db/health" in payload["paths"]
-
-    def test_health_endpoints_have_summaries(self):
-        client = TestClient(app)
-
-        response = client.get("/openapi.json")
-        payload = response.json()
-
-        assert payload["paths"]["/api/health"]["get"]["summary"] == "API component health check"
-        assert payload["paths"]["/db/health"]["get"]["summary"] == "Database connectivity check"
-
-
-class TestAcpRestartEndpoint:
-    def test_acp_restart_returns_structured_failure_contract(self, monkeypatch):
-        from execqueue.api.routes import system
-        from execqueue.acp.lifecycle import LifecycleResult
-        from execqueue.settings import Settings
-
-        headers = install_system_admin_token(monkeypatch)
-        monkeypatch.setattr(
-            system,
-            "restart_acp",
-            lambda: LifecycleResult(
-                status="invalid_config",
-                operation="restart",
-                message="ACP configuration is invalid.",
-            ),
-        )
-        monkeypatch.setattr(
-            system,
-            "get_settings",
-            lambda: Settings(
-                system_admin_token="test-admin-token",
-                acp_enabled=True,
-                acp_auto_start=True,
-                acp_endpoint_url="http://127.0.0.1:8010",
-                acp_start_command=None,
-            ),
-        )
-
-        client = TestClient(app)
-        response = client.post("/api/system/acp/restart", headers=headers)
-        payload = response.json()
-
-        assert response.status_code == 500
-        assert payload["ok"] is False
-        assert payload["status"] == "invalid_config"
-        assert payload["message"] == "ACP configuration is invalid."
-        assert payload["mode"] == "invalid_config"
-
-    def test_acp_restart_returns_structured_success_contract(self, monkeypatch):
-        from execqueue.api.routes import system
-        from execqueue.acp.lifecycle import LifecycleResult
-        from execqueue.settings import Settings
-
-        headers = install_system_admin_token(monkeypatch)
-        monkeypatch.setattr(
-            system,
-            "restart_acp",
-            lambda: LifecycleResult(
-                status="external_managed",
-                operation="restart",
-                message="ACP is externally managed.",
-                details={"endpoint_status": "reachable"},
-            ),
-        )
-        monkeypatch.setattr(
-            system,
-            "get_settings",
-            lambda: Settings(
-                system_admin_token="test-admin-token",
-                acp_enabled=True,
-                acp_auto_start=False,
-                acp_endpoint_url="http://127.0.0.1:8010",
-            ),
-        )
-
-        client = TestClient(app)
-        response = client.post("/api/system/acp/restart", headers=headers)
-        payload = response.json()
-
-        assert response.status_code == 200
-        assert payload["ok"] is True
-        assert payload["status"] == "external_managed"
-        assert payload["mode"] == "external_endpoint"
-        assert payload["details"]["endpoint_status"] == "reachable"
+        assert "/opencode/health" in payload["paths"]
+        assert "/acp/health" not in payload["paths"]

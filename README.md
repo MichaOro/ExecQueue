@@ -4,8 +4,8 @@ Execution Queue System.
 
 ## API
 
-The project now includes a minimal FastAPI setup that keeps technical system
-endpoints separate from a future domain API area for tenant-aware features.
+The project exposes a minimal FastAPI application with tenant-neutral system
+routes and a reserved `/api` namespace for later domain APIs.
 
 ### Start
 
@@ -25,15 +25,78 @@ Behavior:
 
 - The API always starts.
 - The Telegram bot starts only when `TELEGRAM_BOT_ENABLED=true` and `TELEGRAM_BOT_TOKEN` is set.
-- If Telegram is enabled without a token, the orchestrator logs a clear configuration error and keeps the API startup path available.
+- OpenCode is never started, stopped, or restarted by ExecQueue. It is treated as an optional external HTTP service.
+
+### Restart
+
+Global restart via script:
+
+```bash
+./ops/scripts/global_restart.sh
+```
+
+Restarts the following services in order:
+1. API
+2. Telegram Bot
+
+Note: OpenCode is never restarted by ExecQueue. It must be managed separately.
+
+### OpenCode
+
+ExecQueue supports only an external OpenCode endpoint contract.
+
+Configuration:
+
+```bash
+OPENCODE_MODE=disabled
+OPENCODE_BASE_URL=http://127.0.0.1:4096
+OPENCODE_TIMEOUT_MS=1000
+```
+
+Valid modes:
+
+- `disabled`
+- `external_endpoint`
+
+Example local OpenCode start command:
+
+```bash
+opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+ExecQueue never starts, stops, or restarts OpenCode. When enabled, it only
+checks whether the configured HTTP endpoint is reachable.
 
 ### Endpoints
 
-- `GET /health` returns `{ "status": "ok" }`
+- `GET /health` returns the aggregated system health
+- `GET /api/health` returns the API component health
+- `GET /db/health` returns the database component health
+- `GET /telegram-bot/health` returns the Telegram bot component health
+- `GET /opencode/health` returns the OpenCode endpoint reachability
 - `GET /docs` exposes Swagger UI
 - `GET /openapi.json` exposes the generated OpenAPI document
 
-Technical endpoints stay global and do not require tenant headers.
+#### Health Status Semantics
+
+The `/health` endpoint returns:
+- `status`: Core system status (OK, DEGRADED, ERROR) based only on required components (API, Database, Telegram Bot)
+- `checks`: Detailed status for all components including optional integrations
+
+OpenCode is treated as an optional integration. Its status is reported in the
+`checks.opencode` object but does not affect the core `status` field.
+
+OpenCode reachability states:
+- `disabled`: OpenCode integration is not configured
+- `invalid_config`: OpenCode URL configuration is malformed
+- `available`: OpenCode endpoint is reachable and responding with 2xx
+- `unreachable`: Connection refused or DNS failure
+- `timeout`: Probe exceeded the configured timeout
+- `unexpected_response`: Endpoint responded with 4xx or 5xx status
+
+An unreachable, timed-out, or misconfigured OpenCode endpoint does not degrade
+the core system status. OpenCode is isolated from API, DB, and Telegram
+lifecycle management.
 
 ### Telegram Bot
 
@@ -58,34 +121,15 @@ pip install -e ".[dev,telegram]"
 
 #### Start
 
-Run the bot as a separate process:
-
 ```bash
 python -m execqueue.workers.telegram.bot
 ```
-
-The bot starts polling only when `TELEGRAM_BOT_ENABLED=true` and `TELEGRAM_BOT_TOKEN` is set.
 
 #### Available Commands
 
 - `/start` - Shows welcome message and command list
 - `/health` - Shows the aggregated system health report
-- `/restart` - Admin-only restart command for system, ACP, or all components
-
-#### Manual Validation
-
-1. Set a valid Telegram bot token in `.env`
-2. Set `TELEGRAM_BOT_ENABLED=true`
-3. Start the bot process
-4. Send `/start` to the bot in Telegram
-5. Verify the response contains the command list
-
-#### Notes
-
-- `/restart` is restricted to Telegram admins and the API restart routes require the `X-Admin-Token` header.
-- The bot uses long-polling for updates.
-- Shutdown is handled gracefully with a bounded timeout to avoid hanging restarts.
-- Token is never logged or exposed in runtime output.
+- `/restart` - Admin-only restart command for API and Telegram runtime
 
 The `/api` router namespace is reserved for later fachliche endpoints. No
 business routes are implemented there yet.
@@ -95,9 +139,6 @@ business routes are implemented there yet.
 The current API does not require context headers. To keep later shared domain
 endpoints forward-compatible, `X-Tenant-ID` is the reserved request header
 convention for future tenant-aware handlers under `/api`.
-
-This package intentionally does not implement tenant middleware, tenant
-resolution, or deployment-based tenant defaults yet.
 
 ## Setup
 
@@ -109,8 +150,8 @@ pip install -e ".[dev]"
 
 ### Environment
 
-Copy `.env.example` to `.env` and set separate PostgreSQL URLs for normal runtime
-and tests.
+Copy `.env.example` to `.env` and set separate PostgreSQL URLs for normal
+runtime and tests.
 
 ```bash
 APP_ENV=development
@@ -120,25 +161,20 @@ DATABASE_URL_TEST=postgresql+psycopg://execqueue_test:change-me@localhost:5432/e
 
 The runtime never falls back from `DATABASE_URL_TEST` to `DATABASE_URL`. Tests
 must use the dedicated test database URL exclusively.
-PostgreSQL URLs must declare the driver explicitly with `postgresql+psycopg://`
-so runtime, health checks, and Alembic all consume the same value unchanged.
 
-### Database Runtime Base
+## Database Runtime Base
 
-`execqueue.settings.Settings` now exposes:
+`execqueue.settings.Settings` exposes:
 
 - `APP_ENV` with `development`, `test`, and `production`
 - `DATABASE_URL` for non-test runtime
 - `DATABASE_URL_TEST` for pytest or explicit `APP_ENV=test`
+- `OPENCODE_MODE`, `OPENCODE_BASE_URL`, and `OPENCODE_TIMEOUT_MS` for external OpenCode checks
 
-`execqueue.db.runtime.describe_database_target()` returns only a redacted DSN for
-safe diagnostics. Credentials are not logged.
-
-### Database Migrations
+## Database Migrations
 
 Alembic is configured in `alembic/` and uses the same settings-based database
-selection as the runtime. There is no productive schema creation via
-`create_all()`.
+selection as the runtime.
 
 Common commands:
 
@@ -147,64 +183,18 @@ py -m alembic upgrade head
 py -m alembic downgrade base
 ```
 
-The current migration chain creates:
-
-- `project` with UUID primary key, unique `key`, runtime timestamps, and an `is_active` flag
-- `telegram_users` with role and subscription defaults
-- `task` with UUID primary key, DB-owned `task_number`, `status=backlog`,
-  `retry_count=0`, JSON `details`, and optional `project_id` linkage
-
 ## Tests
 
-Minimaler Testansatz mit pytest.
+Minimal test setup with pytest.
 
-### Ausführung
+### Run
 
 ```bash
 py -m pytest
 ```
 
-### DB-Validierung
+### Validation focus
 
-Für den DB-bezogenen Validierungslauf gilt:
-
-- Tests dürfen nie mit `APP_ENV=production` laufen.
-- `DATABASE_URL_TEST` muss von `DATABASE_URL` getrennt sein.
-- Alembic- und Health-Validierung laufen ausschließlich gegen die Testdatenbank.
-
-Empfohlene Kommandos:
-
-```bash
-py -m pytest
-py -m pytest tests/test_settings.py tests/test_db_runtime.py tests/test_db_engine_session.py tests/test_alembic_project_migration.py tests/test_db_health.py tests/test_validation_guard.py
-py -m alembic upgrade head
-py -m alembic downgrade base
-```
-
-### Task Integration Validation
-
-Die Telegram-Task-Integration wird bewusst mit einer kleinen, gezielten Testmenge abgesichert:
-
-- `tests/test_alembic_project_migration.py` validiert die Alembic-Erzeugung der `task`-Tabelle gegen die Test-DB
-- `tests/test_task_model.py` prueft ORM-Defaults und Constraints fuer `Task`
-- `tests/test_task_api.py` deckt `POST /api/tasks` und `GET /api/tasks/{task_number}/status` inklusive Fehlerfaellen ab
-- `tests/test_telegram_api_client.py` prueft die Bot-zu-API-Vertragsabbildung
-- `tests/test_telegram_commands.py` sichert Rollenpruefung, `/create`, `/status` und die erweiterte `/help`-Ausgabe ab
-
-### Testinfrastruktur
-
-- **Framework**: pytest mit pytest-asyncio für async-Tests
-- **Konfiguration**: `pyproject.toml`
-- **Testverzeichnis**: `tests/`
-- **Aktueller Umfang**: Smoke-Tests zur Infrastrukturvalidierung
-
-### Bewusste Entscheidungen
-
-- Keine Aufteilung in `unit/`, `integration/`, `e2e/` – erfolgt erst bei entsprechender fachlicher Codebasis
-- Keine Coverage-Pflicht im initialen Setup
-- Keine CI-Pipeline im aktuellen Scope
-- Keine künstlichen Test-Fixtures ohne konkrete Wiederverwendung
-
-### Erweiterbarkeit
-
-Tests werden erst bei Vorliegen relevanter produktiver Module eingeführt. Der aktuelle Minimalansatz dient ausschließlich der Validierung der Testinfrastruktur selbst.
+- Tests must never run with `APP_ENV=production`.
+- `DATABASE_URL_TEST` must stay separate from `DATABASE_URL`.
+- OpenCode tests cover `disabled`, `external_endpoint + unreachable`, and `external_endpoint + reachable`.

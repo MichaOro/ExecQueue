@@ -1,11 +1,10 @@
 """Central runtime configuration for ExecQueue."""
 
-import os
 from enum import Enum
 from functools import lru_cache
 from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,18 +16,11 @@ class RuntimeEnvironment(str, Enum):
     PRODUCTION = "production"
 
 
-class AcpOperatingMode(str, Enum):
-    """Deterministic ACP operating mode derived from configuration.
-
-    This is the single authoritative place where the ACP mode is decided.
-    All downstream components (orchestrator, health, API, Telegram) must
-    use ``resolve_acp_mode()`` instead of re-implementing env-var logic.
-    """
+class OpenCodeOperatingMode(str, Enum):
+    """Supported OpenCode runtime modes."""
 
     DISABLED = "disabled"
     EXTERNAL_ENDPOINT = "external_endpoint"
-    LOCAL_MANAGED_PROCESS = "local_managed_process"
-    INVALID_CONFIG = "invalid_config"
 
 
 def validate_database_driver(database_url: str | None, field_name: str) -> str | None:
@@ -91,7 +83,6 @@ class Settings(BaseSettings):
         description="Seconds to wait for a pooled database connection.",
     )
 
-    # Telegram Bot Configuration
     telegram_bot_token: str | None = Field(
         default=None,
         description="Telegram Bot API token. Required only if bot is enabled.",
@@ -139,48 +130,19 @@ class Settings(BaseSettings):
         description="ASGI application import path used by the local API orchestrator.",
     )
 
-    # ACP Integration Configuration
-    acp_enabled: bool = Field(
-        default=False,
-        description="Whether ACP integration is enabled.",
+    opencode_mode: OpenCodeOperatingMode = Field(
+        default=OpenCodeOperatingMode.DISABLED,
+        description="OpenCode integration mode: disabled or external_endpoint.",
     )
-    acp_host: str = Field(
-        default="127.0.0.1",
-        description="Host used for a locally started ACP process.",
+    opencode_base_url: str = Field(
+        default="http://127.0.0.1:4096",
+        description="Base URL of the externally managed OpenCode HTTP service.",
     )
-    acp_port: int = Field(
-        default=8010,
-        ge=1,
-        le=65535,
-        description="Port used for a locally started ACP process.",
-    )
-    acp_auto_start: bool = Field(
-        default=False,
-        description="Whether the local orchestrator should auto-start ACP when enabled.",
-    )
-    acp_start_command: str | None = Field(
-        default=None,
-        description="Shell-style command used to start ACP as a local managed process.",
-    )
-    acp_endpoint_url: str | None = Field(
-        default=None,
-        description="ACP API endpoint URL.",
-    )
-    acp_api_key: str | None = Field(
-        default=None,
-        description="ACP API authentication key.",
-    )
-    acp_timeout: int = Field(
-        default=30,
-        ge=1,
-        le=120,
-        description="ACP request timeout in seconds (1-120).",
-    )
-    acp_retry_count: int = Field(
-        default=3,
-        ge=0,
-        le=10,
-        description="Number of retry attempts for ACP requests (0-10).",
+    opencode_timeout_ms: int = Field(
+        default=1000,
+        ge=100,
+        le=10000,
+        description="Timeout for OpenCode reachability checks in milliseconds.",
     )
 
     @field_validator("database_url", "database_url_test")
@@ -188,6 +150,15 @@ class Settings(BaseSettings):
     def validate_postgres_driver(cls, value: str | None, info) -> str | None:
         """Reject implicit PostgreSQL driver selection to keep runtime and Alembic aligned."""
         return validate_database_driver(value, info.field_name.upper())
+
+    @field_validator("opencode_base_url")
+    @classmethod
+    def validate_opencode_base_url(cls, value: str) -> str:
+        """Require an explicit HTTP(S) base URL for OpenCode."""
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("OPENCODE_BASE_URL must be a valid http(s) URL.")
+        return value.rstrip("/") or value
 
     @property
     def is_test_environment(self) -> bool:
@@ -210,54 +181,18 @@ class Settings(BaseSettings):
             )
         return self.database_url
 
-    @model_validator(mode="after")
-    def validate_runtime_database_configuration(self) -> "Settings":
+    @property
+    def opencode_enabled(self) -> bool:
+        """Return whether OpenCode endpoint reachability should be evaluated."""
+        return self.opencode_mode is OpenCodeOperatingMode.EXTERNAL_ENDPOINT
+
+    def model_post_init(self, __context: object) -> None:
         """Validate environment-specific database settings with no prod/test fallback."""
         if self.is_test_environment and self.database_url and self.database_url_test:
             if self.database_url == self.database_url_test:
                 raise ValueError(
                     "DATABASE_URL and DATABASE_URL_TEST must not point to the same database."
                 )
-
-        return self
-
-
-def resolve_acp_mode(settings: Settings) -> AcpOperatingMode:
-    """Resolve the ACP operating mode from the given settings.
-
-    This is the **single authoritative function** for determining the ACP
-    operating mode. No other module should re-implement this logic.
-
-    Mode matrix (see also ``.env.example``):
-
-    ======================  =============  =================  ===================  ===================
-    Mode                    ACP_ENABLED    ACP_AUTO_START     ACP_ENDPOINT_URL     ACP_START_COMMAND
-    ======================  =============  =================  ===================  ===================
-    ``disabled``            false          *any*              *any*                *any*
-    ``external_endpoint``   true           false              **required**         *any*
-    ``local_managed...``    true           true               **required**         **required**
-    ``invalid_config``      true           false              missing              *any*
-    ``invalid_config``      true           true               missing              *any*
-    ``invalid_config``      true           true               *any*                missing
-    ======================  =============  =================  ===================  ===================
-
-    Returns:
-        The resolved operating mode.
-    """
-    if not settings.acp_enabled:
-        return AcpOperatingMode.DISABLED
-
-    # ACP is enabled – validate the combination
-    if settings.acp_auto_start:
-        # local_managed_process requires both endpoint_url and start_command
-        if not settings.acp_endpoint_url or not settings.acp_start_command:
-            return AcpOperatingMode.INVALID_CONFIG
-        return AcpOperatingMode.LOCAL_MANAGED_PROCESS
-
-    # external_endpoint requires at least endpoint_url
-    if not settings.acp_endpoint_url:
-        return AcpOperatingMode.INVALID_CONFIG
-    return AcpOperatingMode.EXTERNAL_ENDPOINT
 
 
 @lru_cache

@@ -6,7 +6,6 @@ import logging
 
 import httpx
 
-from execqueue.acp.lifecycle import LifecycleResult, restart_acp
 from execqueue.health.service import get_overall_health, render_health_report, status_to_emoji
 from execqueue.settings import get_settings
 from execqueue.workers.telegram.api_client import api_client
@@ -29,7 +28,6 @@ except ImportError:
 CREATE_TASK_TYPE = 1
 CREATE_TITLE = 2
 CREATE_PROMPT = 3
-ACP_RESTART_SKIPPED_STATUSES = {"disabled", "external_managed"}
 
 
 def get_command_list() -> list[dict[str, str]]:
@@ -73,49 +71,6 @@ async def trigger_system_restart() -> tuple[bool, str]:
     except Exception:
         logger.exception("Unexpected error while triggering system restart")
         return False, "Restart failed due to an unexpected error."
-
-
-def _render_acp_restart_feedback(result: LifecycleResult) -> tuple[bool, str]:
-    """Map lifecycle results to safe Telegram operator feedback."""
-    if result.status == "success":
-        return True, "ACP-Neustart ausgefuehrt."
-    if result.status == "disabled":
-        return False, "ACP ist deaktiviert; kein Restart ausgefuehrt."
-    if result.status == "external_managed":
-        return False, "ACP wird extern verwaltet; kein lokaler Restart ausgefuehrt."
-    if result.status == "invalid_config":
-        return False, "ACP-Konfiguration ungueltig; Details in Logs oder Health pruefen."
-    if result.status == "failed":
-        return False, "ACP-Neustart fehlgeschlagen; Details in Logs oder Health pruefen."
-    return False, "ACP-Neustart konnte nicht ausgefuehrt werden; Details in Logs oder Health pruefen."
-
-
-async def trigger_acp_restart() -> tuple[bool, str]:
-    """Trigger ACP restart via central lifecycle authority."""
-    result = restart_acp()
-    return _render_acp_restart_feedback(result)
-
-
-async def trigger_system_restart_all() -> tuple[bool, str]:
-    """Trigger full system restart including ACP when enabled."""
-    success, message = await trigger_system_restart()
-    if not success:
-        return success, message
-
-    acp_result = restart_acp()
-    acp_success, acp_message = _render_acp_restart_feedback(acp_result)
-
-    if acp_success:
-        return True, "Vollstaendiger Neustart (System + ACP) wurde ausgeloest."
-
-    logger.warning(
-        "ACP restart after system restart resulted in status '%s': %s",
-        acp_result.status,
-        acp_message,
-    )
-    if acp_result.status in ACP_RESTART_SKIPPED_STATUSES:
-        return True, f"System-Neustart wurde ausgeloest. {acp_message}"
-    return True, f"System-Neustart wurde ausgeloest, ACP jedoch nicht: {acp_message}"
 
 
 def get_start_message(role: str | None = None, is_active: bool = False) -> str:

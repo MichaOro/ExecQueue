@@ -28,8 +28,8 @@ def create_app() -> FastAPI:
                 "description": "Endpoints related to the Telegram bot worker component.",
             },
             {
-                "name": "ACP",
-                "description": "Endpoints related to the ACP (OpenCode ACP) component.",
+                "name": "OpenCode",
+                "description": "Endpoints related to the external OpenCode HTTP service.",
             },
         ],
         summary="System routes stay tenant-neutral while domain routes are prepared for later tenant-aware APIs.",

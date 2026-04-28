@@ -86,6 +86,90 @@ class TestAggregateSystemStatus:
         assert aggregate_system_status(components) == "DEGRADED"
 
 
+class TestOptionalComponentExclusion:
+    """Tests for optional component exclusion from core system status."""
+
+    def test_opencode_degraded_does_not_affect_core_status(self):
+        """OpenCode as optional component should not degrade core system status."""
+        components = [
+            HealthCheckResult(component="api", status="OK", detail="OK"),
+            HealthCheckResult(component="database", status="OK", detail="OK"),
+            HealthCheckResult(component="telegram_bot", status="OK", detail="OK"),
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="disabled"),
+        ]
+        # With exclude_optional=True (default), core status should be OK
+        assert aggregate_system_status(components, exclude_optional=True) == "OK"
+
+    def test_opencode_unreachable_does_not_affect_core_status(self):
+        """Unreachable OpenCode should not degrade core system status."""
+        components = [
+            HealthCheckResult(component="api", status="OK", detail="OK"),
+            HealthCheckResult(component="database", status="OK", detail="OK"),
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="unreachable"),
+        ]
+        assert aggregate_system_status(components, exclude_optional=True) == "OK"
+
+    def test_opencode_timeout_does_not_affect_core_status(self):
+        """OpenCode timeout should not degrade core system status."""
+        components = [
+            HealthCheckResult(component="api", status="OK", detail="OK"),
+            HealthCheckResult(component="database", status="OK", detail="OK"),
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="timeout"),
+        ]
+        assert aggregate_system_status(components, exclude_optional=True) == "OK"
+
+    def test_opencode_invalid_config_does_not_affect_core_status(self):
+        """OpenCode invalid config should not degrade core system status."""
+        components = [
+            HealthCheckResult(component="api", status="OK", detail="OK"),
+            HealthCheckResult(component="database", status="OK", detail="OK"),
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="invalid_config"),
+        ]
+        assert aggregate_system_status(components, exclude_optional=True) == "OK"
+
+    def test_opencode_unexpected_response_does_not_affect_core_status(self):
+        """OpenCode unexpected response should not degrade core system status."""
+        components = [
+            HealthCheckResult(component="api", status="OK", detail="OK"),
+            HealthCheckResult(component="database", status="OK", detail="OK"),
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="unexpected_response"),
+        ]
+        assert aggregate_system_status(components, exclude_optional=True) == "OK"
+
+    def test_opencode_included_when_exclude_optional_false(self):
+        """When exclude_optional=False, OpenCode should affect core status."""
+        components = [
+            HealthCheckResult(component="api", status="OK", detail="OK"),
+            HealthCheckResult(component="database", status="OK", detail="OK"),
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="disabled"),
+        ]
+        assert aggregate_system_status(components, exclude_optional=False) == "DEGRADED"
+
+    def test_all_optional_components_returns_ok(self):
+        """If all components are optional, return OK as safe default."""
+        components = [
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="disabled"),
+        ]
+        assert aggregate_system_status(components, exclude_optional=True) == "OK"
+
+    def test_core_degraded_with_optional_degraded_returns_degraded(self):
+        """Core degraded status is preserved even with optional components."""
+        components = [
+            HealthCheckResult(component="api", status="OK", detail="OK"),
+            HealthCheckResult(component="database", status="DEGRADED", detail="slow"),
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="disabled"),
+        ]
+        assert aggregate_system_status(components, exclude_optional=True) == "DEGRADED"
+
+    def test_core_error_with_optional_degraded_returns_error(self):
+        """Core error status takes priority even with optional components."""
+        components = [
+            HealthCheckResult(component="api", status="ERROR", detail="down"),
+            HealthCheckResult(component="opencode", status="DEGRADED", detail="disabled"),
+        ]
+        assert aggregate_system_status(components, exclude_optional=True) == "ERROR"
+
+
 class TestStatusToEmoji:
     """Tests for the status_to_emoji function."""
 
@@ -106,6 +190,7 @@ class TestFormattingHelpers:
     def test_format_component_name_uses_aliases(self):
         assert format_component_name("api") == "API"
         assert format_component_name("telegram_bot") == "Telegram Bot"
+        assert format_component_name("opencode") == "OpenCode"
 
     def test_format_status_label_is_user_friendly(self):
         assert format_status_label("OK") == "OK"
