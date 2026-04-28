@@ -48,7 +48,24 @@
     "prune": true,
     "reserved": 12000
   },
-  "permission": "allow",
+  "permission": {
+    "*": "allow",
+    "read": {
+      "*": "allow"
+    },
+    "skill": {
+      "*": "allow"
+    },
+    "task": "allow",
+    "external_directory": {
+      "*": "allow"
+    },
+    "bash": {
+      "*": "allow"
+    },
+    "git_*": "allow",
+    "postgres_*": "allow"
+  },
   "mcp": {
     "filesystem": {
       "type": "local",
@@ -101,41 +118,11 @@
       "permission": {
         "edit": "allow",
         "bash": {
-          "*": "ask",
-          "ls*": "allow",
-          "dir*": "allow",
-          "find *": "allow",
-          "grep *": "allow",
-          "sort *": "allow",
-          "cat *": "allow",
-          "head *": "allow",
-          "tail *": "allow",
-          "sed *": "allow",
-          "awk *": "allow",
-          "Get-ChildItem*": "allow",
-          "Get-Content*": "allow",
-          "git status*": "allow",
-          "git diff*": "allow",
-          "git log*": "allow",
-          "git show*": "allow",
-          "rg *": "allow",
-          "pytest*": "allow",
-          "python -m pytest*": "allow",
-          "git commit*": "deny",
-          "git push*": "deny",
-          "git pull*": "deny",
-          "git merge*": "deny",
-          "git rebase*": "deny",
-          "git checkout*": "deny",
-          "git switch*": "deny",
-          "git reset*": "deny",
-          "git clean*": "deny",
-          "git tag*": "deny"
+          "*": "allow"
         },
-        "task": {
-          "*": "allow",
-          "db-writer": "ask"
-        }
+        "task": "allow",
+        "git_*": "allow",
+        "postgres_*": "allow"
       }
     },
     "plan": {
@@ -145,39 +132,12 @@
       "temperature": 0.1,
       "prompt": "{file:./.opencode/prompts/plan.md}",
       "permission": {
-        "edit": "deny",
+        "edit": "allow",
         "bash": {
-          "*": "ask",
-          "ls*": "allow",
-          "dir*": "allow",
-          "find *": "allow",
-          "grep *": "allow",
-          "sort *": "allow",
-          "cat *": "allow",
-          "head *": "allow",
-          "tail *": "allow",
-          "sed *": "allow",
-          "awk *": "allow",
-          "Get-ChildItem*": "allow",
-          "Get-Content*": "allow",
-          "git status*": "allow",
-          "git diff*": "allow",
-          "git log*": "allow",
-          "git show*": "allow",
-          "rg *": "allow",
-          "pytest*": "allow",
-          "python -m pytest*": "allow",
-          "git commit*": "deny",
-          "git push*": "deny",
-          "git pull*": "deny",
-          "git merge*": "deny",
-          "git rebase*": "deny",
-          "git checkout*": "deny",
-          "git switch*": "deny",
-          "git reset*": "deny",
-          "git clean*": "deny",
-          "git tag*": "deny"
-        }
+          "*": "allow"
+        },
+        "git_*": "allow",
+        "postgres_*": "allow"
       }
     },
     "review": {
@@ -187,39 +147,12 @@
       "temperature": 0.1,
       "prompt": "{file:./.opencode/prompts/review.md}",
       "permission": {
-        "edit": "deny",
+        "edit": "allow",
         "bash": {
-          "*": "ask",
-          "ls*": "allow",
-          "dir*": "allow",
-          "find *": "allow",
-          "grep *": "allow",
-          "sort *": "allow",
-          "cat *": "allow",
-          "head *": "allow",
-          "tail *": "allow",
-          "sed *": "allow",
-          "awk *": "allow",
-          "Get-ChildItem*": "allow",
-          "Get-Content*": "allow",
-          "git status*": "allow",
-          "git diff*": "allow",
-          "git log*": "allow",
-          "git show*": "allow",
-          "rg *": "allow",
-          "pytest*": "allow",
-          "python -m pytest*": "allow",
-          "git commit*": "deny",
-          "git push*": "deny",
-          "git pull*": "deny",
-          "git merge*": "deny",
-          "git rebase*": "deny",
-          "git checkout*": "deny",
-          "git switch*": "deny",
-          "git reset*": "deny",
-          "git clean*": "deny",
-          "git tag*": "deny"
-        }
+          "*": "allow"
+        },
+        "git_*": "allow",
+        "postgres_*": "allow"
       }
     },
     "db-inspector": {
@@ -230,8 +163,9 @@
       "prompt": "{file:./.opencode/prompts/db-inspector.md}",
       "permission": {
         "postgres_*": "allow",
-        "edit": "deny",
-        "bash": "deny"
+        "edit": "allow",
+        "bash": "allow",
+        "git_*": "allow"
       }
     },
     "db-writer": {
@@ -241,10 +175,11 @@
       "temperature": 0.0,
       "prompt": "{file:./.opencode/prompts/db-writer.md}",
       "permission": {
-        "postgres_*": "ask",
-        "edit": "deny",
-        "bash": "deny",
-        "task": "deny"
+        "postgres_*": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "task": "allow",
+        "git_*": "allow"
       }
     }
   }

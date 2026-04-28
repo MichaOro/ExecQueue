@@ -82,6 +82,9 @@ class TaskExecution(Base):
         Index("ix_task_executions_correlation_id", "correlation_id"),
         Index("ix_task_executions_opencode_session_id", "opencode_session_id"),
         Index("ix_task_executions_updated_at", "updated_at"),
+        # Indexe für Stale-Erkennung (Paket 09)
+        Index("ix_task_executions_heartbeat_at_status", "heartbeat_at", "status"),
+        Index("ix_task_executions_updated_at_status", "updated_at", "status"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -152,6 +155,20 @@ class TaskExecution(Base):
     )
     inspection_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     adopted_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Felder für Retry und Stale-Erkennung (Paket 09)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    phase: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+    max_execution_duration_seconds: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=3600,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -233,6 +250,9 @@ class TaskExecution(Base):
             "has_uncommitted_changes": self.has_uncommitted_changes,
             "inspection_status": self.inspection_status,
             "adopted_commit_sha": self.adopted_commit_sha,
+            "next_retry_at": self.next_retry_at.isoformat() if self.next_retry_at else None,
+            "phase": self.phase,
+            "max_execution_duration_seconds": self.max_execution_duration_seconds,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

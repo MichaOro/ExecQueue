@@ -1,0 +1,302 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "enabled_providers": [
+    "adesso",
+    "openrouter"
+  ],
+  "provider": {
+    "adesso": {
+      "name": "adesso-ai-hub",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://adesso-ai-hub.3asabc.de/v1"
+      },
+      "models": {
+        "gpt-oss-120b-sovereign": {
+          "name": "gpt-oss-120b-sovereign",
+          "tool_call": true
+        },
+        "qwen-3.5-122b-sovereign": {
+          "name": "qwen-3.5-122b-sovereign",
+          "tool_call": true
+        }
+      }
+    }
+  },
+  "model": "adesso/qwen-3.5-122b-sovereign",
+  "small_model": "gpt-oss-120b-sovereign",
+  "default_agent": "build",
+  "share": "disabled",
+  "instructions": [
+    "./.opencode/instructions/engineering.md",
+    "./.opencode/instructions/git-safety.md",
+    "./.opencode/instructions/mcp-usage.md"
+  ],
+  "watcher": {
+    "ignore": [
+      ".git/**",
+      ".pytest_cache/**",
+      "**/__pycache__/**",
+      "**/*.pyc",
+      "execqueue.egg-info/**",
+      "ops/logs/**",
+      "ops/pids/**"
+    ]
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 12000
+  },
+  "permission": {
+    "*": "allow",
+    "read": {
+      "*": "allow",
+      "*.env": "allow",
+      "*.env.*": "allow",
+      "*.env.example": "allow"
+    },
+    "skill": {
+      "*": "allow"
+    },
+    "task": "allow",
+    "external_directory": {
+      "*": "ask",
+      "{env:TEMP}\\**": "allow",
+      "{env:TMP}\\**": "allow"
+    },
+    "bash": {
+      "*": "ask",
+      "ls*": "allow",
+      "dir*": "allow",
+      "find *": "allow",
+      "grep *": "allow",
+      "sort *": "allow",
+      "cat *": "allow",
+      "head *": "allow",
+      "tail *": "allow",
+      "sed *": "allow",
+      "awk *": "allow",
+      "Get-ChildItem*": "allow",
+      "Get-Content*": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git show*": "allow",
+      "rg *": "allow",
+      "pytest*": "allow",
+      "python -m pytest*": "allow",
+      "git commit*": "deny",
+      "git push*": "deny",
+      "git pull*": "deny",
+      "git merge*": "deny",
+      "git rebase*": "deny",
+      "git checkout*": "deny",
+      "git switch*": "deny",
+      "git reset*": "deny",
+      "git clean*": "deny",
+      "git tag*": "deny"
+    },
+    "git_*": "deny",
+    "postgres_*": "deny"
+  },
+  "mcp": {
+    "filesystem": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        ".",
+        "{env:TEMP}",
+        "{env:TMP}"
+      ],
+      "enabled": true
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "enabled": true
+    },
+    "postgres": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://localhost/postgres"
+      ],
+      "enabled": true
+    },
+    "git": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@cyanheads/git-mcp-server@latest"
+      ],
+      "enabled": true
+    }
+  },
+  "agent": {
+    "build": {
+      "description": "Primary delivery agent for ExecQueue. Writes directly into the project while staying within the local worktree and repo safety rules.",
+      "mode": "primary",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "temperature": 0.2,
+      "prompt": "{file:./.opencode/prompts/build.md}",
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "ask",
+          "ls*": "allow",
+          "dir*": "allow",
+          "find *": "allow",
+          "grep *": "allow",
+          "sort *": "allow",
+          "cat *": "allow",
+          "head *": "allow",
+          "tail *": "allow",
+          "sed *": "allow",
+          "awk *": "allow",
+          "Get-ChildItem*": "allow",
+          "Get-Content*": "allow",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow",
+          "rg *": "allow",
+          "pytest*": "allow",
+          "python -m pytest*": "allow",
+          "git commit*": "deny",
+          "git push*": "deny",
+          "git pull*": "deny",
+          "git merge*": "deny",
+          "git rebase*": "deny",
+          "git checkout*": "deny",
+          "git switch*": "deny",
+          "git reset*": "deny",
+          "git clean*": "deny",
+          "git tag*": "deny"
+        },
+        "task": {
+          "*": "allow",
+          "db-writer": "ask"
+        }
+      }
+    },
+    "plan": {
+      "description": "Primary planning agent for analysis, architecture thinking, and safe recommendations without changing files.",
+      "mode": "primary",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "temperature": 0.1,
+      "prompt": "{file:./.opencode/prompts/plan.md}",
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "ask",
+          "ls*": "allow",
+          "dir*": "allow",
+          "find *": "allow",
+          "grep *": "allow",
+          "sort *": "allow",
+          "cat *": "allow",
+          "head *": "allow",
+          "tail *": "allow",
+          "sed *": "allow",
+          "awk *": "allow",
+          "Get-ChildItem*": "allow",
+          "Get-Content*": "allow",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow",
+          "rg *": "allow",
+          "pytest*": "allow",
+          "python -m pytest*": "allow",
+          "git commit*": "deny",
+          "git push*": "deny",
+          "git pull*": "deny",
+          "git merge*": "deny",
+          "git rebase*": "deny",
+          "git checkout*": "deny",
+          "git switch*": "deny",
+          "git reset*": "deny",
+          "git clean*": "deny",
+          "git tag*": "deny"
+        }
+      }
+    },
+    "review": {
+      "description": "Read-only review subagent focused on bugs, regressions, missing tests, and maintainability.",
+      "mode": "subagent",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "temperature": 0.1,
+      "prompt": "{file:./.opencode/prompts/review.md}",
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "ask",
+          "ls*": "allow",
+          "dir*": "allow",
+          "find *": "allow",
+          "grep *": "allow",
+          "sort *": "allow",
+          "cat *": "allow",
+          "head *": "allow",
+          "tail *": "allow",
+          "sed *": "allow",
+          "awk *": "allow",
+          "Get-ChildItem*": "allow",
+          "Get-Content*": "allow",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow",
+          "rg *": "allow",
+          "pytest*": "allow",
+          "python -m pytest*": "allow",
+          "git commit*": "deny",
+          "git push*": "deny",
+          "git pull*": "deny",
+          "git merge*": "deny",
+          "git rebase*": "deny",
+          "git checkout*": "deny",
+          "git switch*": "deny",
+          "git reset*": "deny",
+          "git clean*": "deny",
+          "git tag*": "deny"
+        }
+      }
+    },
+    "db-inspector": {
+      "description": "Subagent for schema and data inspection through the postgres MCP, intended for read-only exploration.",
+      "mode": "subagent",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "temperature": 0.0,
+      "prompt": "{file:./.opencode/prompts/db-inspector.md}",
+      "permission": {
+        "postgres_*": "allow",
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "db-writer": {
+      "description": "Subagent for explicit database write operations. Always requires approval before using Postgres MCP tools.",
+      "mode": "subagent",
+      "model": "adesso/qwen-3.5-122b-sovereign",
+      "temperature": 0.0,
+      "prompt": "{file:./.opencode/prompts/db-writer.md}",
+      "permission": {
+        "postgres_*": "ask",
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny"
+      }
+    }
+  }
+}

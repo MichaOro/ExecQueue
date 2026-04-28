@@ -68,6 +68,9 @@ class TaskExecutionEvent(Base):
             "'retry.exhausted')",
             name="ck_task_execution_events_event_type_allowed",
         ),
+        # Unique Constraint für Event-Deduplizierung (Paket 01)
+        Index("ix_task_execution_events_unique_sequence", "task_execution_id", "sequence", unique=True),
+        Index("ix_task_execution_events_unique_external_id", "task_execution_id", "external_event_id", unique=True, postgresql_where=text("external_event_id IS NOT NULL")),
         Index("ix_task_execution_events_task_execution_id", "task_execution_id"),
         Index("ix_task_execution_events_direction", "direction"),
         Index("ix_task_execution_events_event_type", "event_type"),

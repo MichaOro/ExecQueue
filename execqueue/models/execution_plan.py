@@ -84,8 +84,8 @@ class ExecutionPlan(Base):
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
-        default=ExecutionStatus.PENDING.value,
-        server_default=ExecutionStatus.PENDING.value,
+        default="pending",
+        server_default="pending",
     )
 
     # Relationships
