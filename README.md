@@ -56,7 +56,7 @@ OPENCODE_TIMEOUT_MS=1000
 Valid modes:
 
 - `disabled`
-- `external_endpoint`
+- `enabled`
 
 Example local OpenCode start command:
 
@@ -197,4 +197,4 @@ py -m pytest
 
 - Tests must never run with `APP_ENV=production`.
 - `DATABASE_URL_TEST` must stay separate from `DATABASE_URL`.
-- OpenCode tests cover `disabled`, `external_endpoint + unreachable`, and `external_endpoint + reachable`.
+- OpenCode tests cover `disabled`, `enabled + unreachable`, and `enabled + reachable`.

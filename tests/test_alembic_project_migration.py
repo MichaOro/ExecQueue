@@ -73,7 +73,8 @@ def test_project_telegram_user_and_task_migrations_upgrade_and_downgrade(tmp_pat
     assert "ck_telegram_users_telegram_users_role_allowed" in check_names
 
     task_columns = {column["name"] for column in inspector.get_columns("task")}
-    assert task_columns == {
+    # Expected columns include original columns plus REQ-011 execution preparation fields
+    expected_task_columns = {
         "id",
         "task_number",
         "title",
@@ -92,7 +93,18 @@ def test_project_telegram_user_and_task_migrations_upgrade_and_downgrade(tmp_pat
         "details",
         "created_at",
         "updated_at",
+        # REQ-011 execution preparation fields
+        "queued_at",
+        "locked_by",
+        "preparation_attempt_count",
+        "last_preparation_error",
+        "branch_name",
+        "worktree_path",
+        "commit_sha_before",
+        "prepared_context_version",
+        "batch_id",
     }
+    assert task_columns == expected_task_columns
 
     task_unique_constraints = inspector.get_unique_constraints("task")
     task_unique_names = {constraint["name"] for constraint in task_unique_constraints}
@@ -138,7 +150,7 @@ def test_project_telegram_user_and_task_migrations_upgrade_and_downgrade(tmp_pat
 
     with engine.connect() as connection:
         version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert version == "20260426_04"
+    assert version == "99d5a553d696"  # Updated to include REQ-011 migration
 
     command.downgrade(config, "base")
 

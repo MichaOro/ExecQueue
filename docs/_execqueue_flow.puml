@@ -1,5 +1,5 @@
 @startuml
-title ExecQueue – Vereinheitlichter event-getriebener Task Flow
+title ExecQueue – Event-getriebener Task Flow mit OpenCode Serve
 
 start
 
@@ -15,6 +15,8 @@ if (Artefakt-Typ gültig?) then (ja)
     :task_type = planning;
   elseif (Analyse Task?) then (ja)
     :task_type = analysis;
+  else (nein)
+    :task_type = unknown;
   endif
 
   :Task erzeugen;
@@ -27,72 +29,124 @@ else (nein)
   stop
 endif
 
-:Orchestrator-Trigger auslösen;
-
 repeat
-  :Orchestrator wird aktiviert;
+
+  :Orchestrator-Trigger auslösen\n(Event driven);
   :Orchestrator prüft ausführbare Tasks;
 
-  if (Ausführbarer Task vorhanden?) then (ja)
-    :Task atomar locken;
-    :Task Status = in_progress;
+  if (Ausführbare Tasks vorhanden?) then (ja)
 
-    :Task Execution erzeugen;
-    :Execution Runner erzeugen;
-    :Runner-ID speichern;
+    repeat
 
-    if (Task benötigt Schreibzugriff?) then (ja)
-      :Git Branch erzeugen;
-      :Git Worktree erzeugen;
-      :Worktree / Branch in task_execution speichern;
-      :OpenCode ACP Session im Worktree starten;
-    else (nein)
-      :OpenCode ACP Session read-only starten;
-    endif
+      :Ausführbaren Task ermitteln;
 
-    :Task Prompt an OpenCode via ACP senden;
-    :OpenCode führt Task aus;
-    :ACP Responses / Events speichern;
+      if (Task benötigt Schreibzugriff?) then (ja)
 
-    if (Ausführung erfolgreich?) then (ja)
+        if (Task parallelisierbar?) then (ja)
+          :Task für parallelen Write-Batch vormerken;
+        else (nein)
+          :Task für sequenziellen Write-Batch vormerken;
+        endif
 
-      if (Task type = planning?) then (ja)
-        :Execution Plan speichern;
-        :Arbeitspakete als Tasks erzeugen;
-        :Dependencies + order_index speichern;
-        :Neue Tasks Status = backlog;
-        :Requirement Status = ready_for_execution;
-      endif
-
-      if (Task type = analysis?) then (ja)
-        :Analyseergebnis speichern;
-        :Befund / Ursache / Handlungsoptionen dokumentieren;
-        :Empfohlene Folgeaktivitäten ableiten;
-      endif
-
-      if (Task type = execution?) then (ja)
-        :Ausführungsergebnis speichern;
-      endif
-
-      if (Code geändert?) then (ja)
-        :Commit erzeugen;
-        :commit_sha_after speichern;
-        :Task Status = review;
       else (nein)
-        :Task Status = done;
+        :Task für parallelen Read-only-Batch vormerken;
       endif
 
-    else (nein)
-      :Fehler speichern;
-      :Task Status = failed;
-    endif
+      :Task für atomaren Lock vormerken;
 
-    :Task Execution finalisieren;
-    :Runner abschließen;
+    repeat while (Parallelisierbare Tasks vorhanden?) is (ja)
 
-    :Abhängigkeiten und aggregierte Status aktualisieren;
+    :Vorgemerkte Tasks atomar locken;
+    :Task Status = queued;
 
-    :Orchestrator-Trigger auslösen;
+    repeat
+
+      :Gelockten Task vorbereiten;
+
+      if (Task benötigt Schreibzugriff?) then (ja)
+
+        if (Task hat bereits Worktree?) then (ja)
+          :Vorhandenen Worktree verwenden;
+        else (nein)
+
+          if (Git Branch definiert?) then (ja)
+            :Definierten Git Branch verwenden;
+          else (nein)
+            :Git Branch für Task erzeugen;
+            :Branch am Task speichern;
+          endif
+
+          :Eigenen Git Worktree erzeugen;
+          :Worktree am Task speichern;
+
+        endif
+
+      else (nein)
+        :Read-only / Analyse- / Planning-Kontext verwenden;
+        :Keine Worktree-Isolation notwendig;
+      endif
+
+      :Task Execution erzeugen;
+      :Execution Runner erzeugen;
+      :Runner-ID speichern;
+
+      if (Task benötigt Schreibzugriff?) then (ja)
+        :Runner mit Worktree-Kontext vorbereiten;
+      else (nein)
+        :Runner mit read-only Kontext vorbereiten;
+      endif
+
+      :OpenCode Serve Session starten;
+      :Task Prompt versenden;
+      :Task Status = in_progress;
+
+      :OpenCode führt Task aus;
+      :OpenCode Serve Responses / Events speichern;
+
+      if (Ausführung erfolgreich?) then (ja)
+
+        if (Task type = planning?) then (ja)
+          :Execution Plan speichern;
+          :Arbeitspakete als Tasks erzeugen;
+          :Dependencies + order_index speichern;
+          :Neue Tasks Status = backlog;
+          :Requirement Status = ready_for_execution;
+        endif
+
+        if (Task type = analysis?) then (ja)
+          :Analyseergebnis speichern;
+          :Befund / Ursache / Handlungsoptionen dokumentieren;
+          :Empfohlene Folgeaktivitäten ableiten;
+        endif
+
+        if (Task type = execution?) then (ja)
+          :Ausführungsergebnis speichern;
+        endif
+
+        if (Code geändert?) then (ja)
+          :Commit im Task-Worktree erzeugen;
+          :commit_sha_after speichern;
+          :Task Status = review;
+        else (nein)
+          :Task Status = done;
+        endif
+
+      else (nein)
+        :Fehler speichern;
+        :Task Status = failed;
+      endif
+
+      :Task Execution finalisieren;
+      :Runner abschließen;
+
+      if (Task benötigt Schreibzugriff?) then (ja)
+        :Worktree-Status dokumentieren;
+        :Branch / Commit für Review bereitstellen;
+      endif
+
+      :Abhängigkeiten und aggregierte Status aktualisieren;
+
+    repeat while (Weitere gelockte Tasks im Batch vorhanden?) is (ja)
 
   else (nein)
     :Keine aktuell ausführbaren Tasks;

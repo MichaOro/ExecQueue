@@ -22,7 +22,7 @@ def test_probe_returns_disabled_without_http_call():
 
 def test_probe_reports_available_for_2xx_response():
     settings = Settings(
-        opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+        opencode_mode=OpenCodeOperatingMode.ENABLED,
         opencode_base_url="http://127.0.0.1:4096",
     )
 
@@ -36,7 +36,7 @@ def test_probe_reports_available_for_2xx_response():
 
 def test_probe_reports_unexpected_response_for_4xx():
     settings = Settings(
-        opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+        opencode_mode=OpenCodeOperatingMode.ENABLED,
         opencode_base_url="http://127.0.0.1:4096",
     )
 
@@ -50,7 +50,7 @@ def test_probe_reports_unexpected_response_for_4xx():
 
 def test_probe_reports_unexpected_response_for_5xx():
     settings = Settings(
-        opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+        opencode_mode=OpenCodeOperatingMode.ENABLED,
         opencode_base_url="http://127.0.0.1:4096",
     )
 
@@ -64,7 +64,7 @@ def test_probe_reports_unexpected_response_for_5xx():
 
 def test_probe_reports_unreachable_for_connection_error():
     settings = Settings(
-        opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+        opencode_mode=OpenCodeOperatingMode.ENABLED,
         opencode_base_url="http://127.0.0.1:4096",
     )
 
@@ -77,7 +77,7 @@ def test_probe_reports_unreachable_for_connection_error():
 
 def test_probe_reports_timeout_for_timeout_error():
     settings = Settings(
-        opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+        opencode_mode=OpenCodeOperatingMode.ENABLED,
         opencode_base_url="http://127.0.0.1:4096",
         opencode_timeout_ms=750,
     )
@@ -91,7 +91,7 @@ def test_probe_reports_timeout_for_timeout_error():
 
 def test_probe_reports_invalid_config_for_invalid_url():
     settings = Settings(
-        opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+        opencode_mode=OpenCodeOperatingMode.ENABLED,
         opencode_base_url="http://127.0.0.1:4096",
     )
 
@@ -105,7 +105,7 @@ def test_probe_reports_invalid_config_for_invalid_url():
 
 def test_probe_appends_health_path():
     settings = Settings(
-        opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+        opencode_mode=OpenCodeOperatingMode.ENABLED,
         opencode_base_url="http://127.0.0.1:4096",
     )
 
@@ -142,7 +142,7 @@ class TestHealthcheckStatusMapping:
 
     def test_healthcheck_maps_unreachable_to_degraded(self):
         settings = Settings(
-            opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+            opencode_mode=OpenCodeOperatingMode.ENABLED,
             opencode_base_url="http://127.0.0.1:4096",
         )
 
@@ -154,7 +154,7 @@ class TestHealthcheckStatusMapping:
 
     def test_healthcheck_maps_available_to_ok(self):
         settings = Settings(
-            opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+            opencode_mode=OpenCodeOperatingMode.ENABLED,
             opencode_base_url="http://127.0.0.1:4096",
         )
 
@@ -166,7 +166,7 @@ class TestHealthcheckStatusMapping:
 
     def test_healthcheck_maps_timeout_to_degraded(self):
         settings = Settings(
-            opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+            opencode_mode=OpenCodeOperatingMode.ENABLED,
             opencode_base_url="http://127.0.0.1:4096",
             opencode_timeout_ms=750,
         )
@@ -179,7 +179,7 @@ class TestHealthcheckStatusMapping:
 
     def test_healthcheck_maps_unexpected_response_to_degraded(self):
         settings = Settings(
-            opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+            opencode_mode=OpenCodeOperatingMode.ENABLED,
             opencode_base_url="http://127.0.0.1:4096",
         )
 
@@ -191,7 +191,7 @@ class TestHealthcheckStatusMapping:
 
     def test_healthcheck_maps_invalid_config_to_degraded(self):
         settings = Settings(
-            opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT,
+            opencode_mode=OpenCodeOperatingMode.ENABLED,
             opencode_base_url="http://127.0.0.1:4096",
         )
 

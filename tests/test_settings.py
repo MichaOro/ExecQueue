@@ -30,7 +30,7 @@ class TestSettingsFromEnvironment:
         with patch.dict(
             os.environ,
             {
-                "OPENCODE_MODE": "external_endpoint",
+                "OPENCODE_MODE": "enabled",
                 "OPENCODE_BASE_URL": "http://127.0.0.1:5000",
                 "OPENCODE_TIMEOUT_MS": "1500",
             },
@@ -38,7 +38,7 @@ class TestSettingsFromEnvironment:
         ):
             settings = Settings()
 
-        assert settings.opencode_mode is OpenCodeOperatingMode.EXTERNAL_ENDPOINT
+        assert settings.opencode_mode is OpenCodeOperatingMode.ENABLED
         assert settings.opencode_base_url == "http://127.0.0.1:5000"
         assert settings.opencode_timeout_ms == 1500
 
@@ -122,7 +122,7 @@ class TestSettingsValidation:
 
     def test_opencode_enabled_property(self):
         disabled = Settings(opencode_mode=OpenCodeOperatingMode.DISABLED)
-        enabled = Settings(opencode_mode=OpenCodeOperatingMode.EXTERNAL_ENDPOINT)
+        enabled = Settings(opencode_mode=OpenCodeOperatingMode.ENABLED)
 
         assert disabled.opencode_enabled is False
         assert enabled.opencode_enabled is True

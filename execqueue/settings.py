@@ -20,7 +20,7 @@ class OpenCodeOperatingMode(str, Enum):
     """Supported OpenCode runtime modes."""
 
     DISABLED = "disabled"
-    EXTERNAL_ENDPOINT = "external_endpoint"
+    ENABLED = "enabled"
 
 
 def validate_database_driver(database_url: str | None, field_name: str) -> str | None:
@@ -132,7 +132,7 @@ class Settings(BaseSettings):
 
     opencode_mode: OpenCodeOperatingMode = Field(
         default=OpenCodeOperatingMode.DISABLED,
-        description="OpenCode integration mode: disabled or external_endpoint.",
+        description="OpenCode integration mode: disabled or enabled.",
     )
     opencode_base_url: str = Field(
         default="http://127.0.0.1:4096",
@@ -184,7 +184,7 @@ class Settings(BaseSettings):
     @property
     def opencode_enabled(self) -> bool:
         """Return whether OpenCode endpoint reachability should be evaluated."""
-        return self.opencode_mode is OpenCodeOperatingMode.EXTERNAL_ENDPOINT
+        return self.opencode_mode is OpenCodeOperatingMode.ENABLED
 
     def model_post_init(self, __context: object) -> None:
         """Validate environment-specific database settings with no prod/test fallback."""

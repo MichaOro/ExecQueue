@@ -327,7 +327,7 @@ async def restart_command(
 
         if success:
             await update.message.reply_text(
-                f"*Neustart erfolgreich ausgeloest*\n\n{message}",
+                f"✅ *Neustart erfolgreich ausgeloest*\n\n{message}",
                 parse_mode="Markdown"
             )
         else:

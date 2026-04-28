@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from pydantic_settings import SettingsConfigDict
 
-from execqueue.orchestrator import LaunchPlan, ManagedProcess, build_launch_plan, monitor_processes
+from execqueue.orchestrator_legacy import LaunchPlan, ManagedProcess, build_launch_plan, monitor_processes
 from execqueue.settings import Settings
 
 
@@ -98,7 +98,7 @@ def test_monitor_processes_returns_zero_when_stop_signal_is_set():
 def test_orchestrator_ignores_legacy_acp_settings():
     settings = Settings(
         telegram_bot_enabled=False,
-        opencode_mode="external_endpoint",
+        opencode_mode="enabled",
         opencode_base_url="http://127.0.0.1:4096",
     )
 

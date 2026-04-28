@@ -66,9 +66,12 @@ class RequirementStatus(str, Enum):
 
 
 class TaskStatus(str, Enum):
-    """Initial task lifecycle states."""
+    """Task lifecycle states for REQ-011 orchestrator execution preparation."""
 
     BACKLOG = "backlog"
+    QUEUED = "queued"
+    PREPARED = "prepared"
+    FAILED = "failed"
 
 
 class Project(Base):
@@ -204,6 +207,10 @@ class Task(Base):
             "type IN ('planning', 'execution', 'analysis')",
             name="ck_task_type_allowed",
         ),
+        CheckConstraint(
+            "status IN ('backlog', 'queued', 'prepared', 'failed')",
+            name="ck_task_status_allowed",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -261,6 +268,45 @@ class Task(Base):
         nullable=False,
         default=dict,
         server_default=text("'{}'"),
+    )
+    # REQ-011: Execution preparation metadata
+    queued_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    locked_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    preparation_attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    last_preparation_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    branch_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    worktree_path: Mapped[str | None] = mapped_column(
+        String(1024),
+        nullable=True,
+    )
+    commit_sha_before: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    prepared_context_version: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+    batch_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

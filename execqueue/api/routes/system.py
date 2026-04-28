@@ -110,7 +110,7 @@ async def system_restart() -> dict[str, object]:
     "/api/restart",
     summary="Restart API service only",
     operation_id="api_restart_post",
-    tags=["System"],
+    tags=["API"],
     dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "Restart initiated successfully"},
@@ -129,10 +129,10 @@ async def api_restart() -> dict[str, object]:
 
 
 @router.post(
-    "/api/telegram_bot/restart",
+    "/telegram_bot/restart",
     summary="Restart Telegram Bot service only",
     operation_id="telegram_bot_restart_post",
-    tags=["System"],
+    tags=["Telegram Bot"],
     dependencies=[Depends(require_system_admin)],
     responses={
         200: {"description": "Restart initiated successfully"},
