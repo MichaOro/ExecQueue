@@ -140,6 +140,108 @@ The current API does not require context headers. To keep later shared domain
 endpoints forward-compatible, `X-Tenant-ID` is the reserved request header
 convention for future tenant-aware handlers under `/api`.
 
+## Runner (REQ-012)
+
+The Runner module handles task execution polling, claiming, and processing.
+It supports optional Validator and Watchdog extensions.
+
+### Watchdog Keep-Alive
+
+The Watchdog sends periodic keep-alive pings to an OpenCode session during
+idle periods to prevent session timeouts.
+
+#### Configuration
+
+Add these fields to `RunnerConfig`:
+
+```python
+from execqueue.runner.config import RunnerConfig
+
+config = RunnerConfig(
+    runner_id="my-runner",
+    # Watchdog settings
+    watchdog_enabled=True,              # Enable watchdog (default: False)
+    watchdog_idle_seconds=90,           # Idle time before ping (default: 90)
+    watchdog_max_continues=50,          # Max pings to send (default: 50)
+    watchdog_base_url="http://127.0.0.1:4096",  # OpenCode API base URL
+    watchdog_session_id="sess_abc123",  # OpenCode session ID (required)
+)
+```
+
+#### Behavior
+
+- Watchdog only starts when `watchdog_enabled=True` AND `watchdog_session_id` is set
+- Sends a "continue" ping after `watchdog_idle_seconds` of inactivity
+- Stops sending pings after `watchdog_max_continues` pings have been sent
+- HTTP errors are logged but do not crash the runner
+- Activity is automatically recorded when processing executions
+
+#### Usage
+
+```python
+from execqueue.runner.main import Runner
+from execqueue.runner.config import RunnerConfig
+
+config = RunnerConfig.create_default()
+config.watchdog_enabled = True
+config.watchdog_session_id = "your-session-id"
+
+runner = Runner(config)
+await runner.start()
+# ...
+await runner.stop()
+```
+
+### Validator Extension
+
+The Validator provides an optional hook for validating task execution results.
+Validation results are logged but do not affect execution status.
+
+#### Interface
+
+```python
+from abc import ABC, abstractmethod
+from execqueue.models.task_execution import TaskExecution
+
+class Validator(ABC):
+    @abstractmethod
+    async def validate(self, execution: TaskExecution) -> bool:
+        """Validate an execution. Returns True if passed, False otherwise."""
+        pass
+```
+
+#### MockValidator for Testing
+
+```python
+from execqueue.runner.validator import MockValidator
+
+# Always passes validation
+validator = MockValidator(always_pass=True)
+
+# Always fails validation
+validator = MockValidator(always_pass=False)
+```
+
+#### Integration
+
+```python
+from execqueue.runner.main import Runner
+from execqueue.runner.validator import MockValidator
+
+validator = MockValidator(always_pass=True)
+runner = Runner(config, validator=validator)
+await runner.start()
+```
+
+#### Logging Behavior
+
+- `True` result → INFO log: "Validation passed for execution {id}"
+- `False` result → WARNING log: "Validation failed for execution {id}"
+- Exceptions → WARNING log with full traceback
+
+**Note**: Validator results are currently only logged and do not block or
+change execution status. This is intentional for the initial implementation.
+
 ## Setup
 
 ### Installation

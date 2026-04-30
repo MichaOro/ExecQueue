@@ -63,9 +63,11 @@ class TestEnums:
 
     def test_execution_status_values(self):
         """Test ExecutionStatus enum values."""
-        assert ExecutionStatus.PENDING.value == "pending"
-        assert ExecutionStatus.RUNNING.value == "running"
-        assert ExecutionStatus.SUCCEEDED.value == "succeeded"
+        assert ExecutionStatus.PREPARED.value == "prepared"
+        assert ExecutionStatus.QUEUED.value == "queued"
+        assert ExecutionStatus.IN_PROGRESS.value == "in_progress"
+        assert ExecutionStatus.REVIEW.value == "review"
+        assert ExecutionStatus.DONE.value == "done"
         assert ExecutionStatus.FAILED.value == "failed"
 
     def test_event_direction_values(self):
@@ -262,6 +264,78 @@ class TestModelToDict:
         """Test that TaskExecutionEvent has to_dict method."""
         assert hasattr(TaskExecutionEvent, "to_dict")
         assert callable(getattr(TaskExecutionEvent, "to_dict"))
+
+
+class TestTaskExecutionTotalTokens:
+    """Tests for REQ-013 token tracking field."""
+
+    def test_total_tokens_column_exists(self):
+        """Test that total_tokens column exists on TaskExecution."""
+        assert "total_tokens" in TaskExecution.__table__.columns
+
+    def test_total_tokens_is_nullable(self):
+        """Test that total_tokens column is nullable."""
+        column = TaskExecution.__table__.columns["total_tokens"]
+        assert column.nullable is True
+
+    def test_total_tokens_type_is_biginteger(self):
+        """Test that total_tokens uses BigInteger type."""
+        from sqlalchemy import BigInteger
+
+        column = TaskExecution.__table__.columns["total_tokens"]
+        assert isinstance(column.type, BigInteger)
+
+    def test_total_tokens_defaults_to_none(self):
+        """Test that new TaskExecution instances have total_tokens=None by default."""
+        from uuid import uuid4
+
+        execution = TaskExecution(id=uuid4(), task_id=uuid4())
+        assert execution.total_tokens is None
+
+    def test_total_tokens_can_be_set(self):
+        """Test that total_tokens can be set to an integer value."""
+        from uuid import uuid4
+
+        execution = TaskExecution(id=uuid4(), task_id=uuid4())
+        execution.total_tokens = 1500
+        assert execution.total_tokens == 1500
+
+    def test_total_tokens_none_serializes_to_dict(self):
+        """Test that None total_tokens is included in to_dict output."""
+        from uuid import uuid4
+
+        execution = TaskExecution(id=uuid4(), task_id=uuid4())
+        result = execution.to_dict()
+        assert "total_tokens" in result
+        assert result["total_tokens"] is None
+
+    def test_total_tokens_value_serializes_to_dict(self):
+        """Test that set total_tokens is correctly serialized in to_dict output."""
+        from uuid import uuid4
+
+        execution = TaskExecution(id=uuid4(), task_id=uuid4())
+        execution.total_tokens = 2500
+        result = execution.to_dict()
+        assert "total_tokens" in result
+        assert result["total_tokens"] == 2500
+
+    def test_total_tokens_zero_is_valid(self):
+        """Test that zero total_tokens is a valid value (different from None)."""
+        from uuid import uuid4
+
+        execution = TaskExecution(id=uuid4(), task_id=uuid4())
+        execution.total_tokens = 0
+        result = execution.to_dict()
+        assert result["total_tokens"] == 0
+
+    def test_total_tokens_large_value(self):
+        """Test that large token values work (BigInteger support)."""
+        from uuid import uuid4
+
+        execution = TaskExecution(id=uuid4(), task_id=uuid4())
+        execution.total_tokens = 10_000_000
+        assert execution.total_tokens == 10_000_000
+        assert execution.to_dict()["total_tokens"] == 10_000_000
 
 
 class TestModelRepr:

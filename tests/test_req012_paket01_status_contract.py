@@ -218,3 +218,80 @@ class TestStatusLifecycleDocumentation:
                 "prepared", "queued", "dispatching", "in_progress",
                 "result_inspection", "adopting_commit", "review", "done", "failed"
             ]
+
+
+class TestUniqueActiveExecutionConstraint:
+    """Test the unique constraint for active executions per task (REQ-012).
+
+    This constraint ensures that for each task, there is at most one execution
+    with an active status (not in 'done', 'failed', 'review').
+    """
+
+    def test_unique_active_index_defined_in_model(self):
+        """Test that the partial unique index is defined in the model."""
+        index_names = [idx.name for idx in TaskExecution.__table__.indexes]
+        assert "ix_task_executions_unique_active" in index_names, (
+            "Partial unique index 'ix_task_executions_unique_active' should be defined"
+        )
+
+    def test_unique_active_index_is_unique(self):
+        """Test that the active execution index is marked as unique."""
+        unique_indexes = [
+            idx for idx in TaskExecution.__table__.indexes
+            if idx.name == "ix_task_executions_unique_active"
+        ]
+        assert len(unique_indexes) == 1
+        assert unique_indexes[0].unique is True
+
+    def test_unique_active_index_columns(self):
+        """Test that the unique index includes task_id column."""
+        indexes = [
+            idx for idx in TaskExecution.__table__.indexes
+            if idx.name == "ix_task_executions_unique_active"
+        ]
+        assert len(indexes) == 1
+        # Check column names
+        column_names = [col.name for col in indexes[0].columns]
+        assert "task_id" in column_names
+
+    def test_is_active_property_distinguishes_states(self):
+        """Test that is_active property correctly identifies active vs final states."""
+        # Active states should return True
+        active_states = ["prepared", "queued", "dispatching", "in_progress",
+                        "result_inspection", "adopting_commit"]
+        for state in active_states:
+            execution = TaskExecution()
+            execution.status = state
+            assert execution.is_active is True, (
+                f"State '{state}' should be considered active"
+            )
+
+        # Final states should return False
+        final_states = ["done", "failed", "review"]
+        for state in final_states:
+            execution = TaskExecution()
+            execution.status = state
+            assert execution.is_active is False, (
+                f"State '{state}' should be considered final (not active)"
+            )
+
+    def test_is_done_property_distinguishes_states(self):
+        """Test that is_done property correctly identifies final states."""
+        # Final states should return True
+        final_states = ["done", "failed", "review"]
+        for state in final_states:
+            execution = TaskExecution()
+            execution.status = state
+            assert execution.is_done is True, (
+                f"State '{state}' should be considered done/final"
+            )
+
+        # Active states should return False
+        active_states = ["prepared", "queued", "dispatching", "in_progress",
+                        "result_inspection", "adopting_commit"]
+        for state in active_states:
+            execution = TaskExecution()
+            execution.status = state
+            assert execution.is_done is False, (
+                f"State '{state}' should not be considered done"
+            )

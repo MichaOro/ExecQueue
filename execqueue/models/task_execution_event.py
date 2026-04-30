@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import (
     CheckConstraint,
@@ -78,7 +78,7 @@ class TaskExecutionEvent(Base):
         Index("ix_task_execution_events_sequence", "task_execution_id", "sequence"),
     )
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     task_execution_id: Mapped[UUID] = mapped_column(
         ForeignKey("task_executions.id"),
         nullable=False,

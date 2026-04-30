@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from sqlalchemy import Engine
@@ -40,6 +41,26 @@ def create_session(settings: Settings | None = None) -> Session:
 
 def get_session(settings: Settings | None = None) -> Iterator[Session]:
     """Yield a request-scoped session and ensure it closes afterwards."""
+    session = create_session(settings)
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@asynccontextmanager
+async def get_db_session(settings: Settings | None = None) -> AsyncIterator[Session]:
+    """Async context manager for database sessions.
+
+    This is an async-compatible wrapper around get_session for use with
+    async with statements.
+
+    Args:
+        settings: Optional settings override
+
+    Yields:
+        A database session
+    """
     session = create_session(settings)
     try:
         yield session

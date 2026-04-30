@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -26,7 +27,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from execqueue.db.base import Base
-from execqueue.models.enums import ExecutionStatus
+from execqueue.models.enums import (
+    ACTIVE_EXECUTION_STATUSES,
+    ExecutionStatus,
+    FINAL_EXECUTION_STATUSES,
+)
 
 if TYPE_CHECKING:
     from execqueue.models.task import Task
@@ -85,6 +90,14 @@ class TaskExecution(Base):
         # Indexe für Stale-Erkennung (Paket 09)
         Index("ix_task_executions_heartbeat_at_status", "heartbeat_at", "status"),
         Index("ix_task_executions_updated_at_status", "updated_at", "status"),
+        # Unique Constraint: höchstens eine aktive Execution je Task (REQ-012)
+        # Uses FINAL_EXECUTION_STATUSES constant for consistency with application code
+        Index(
+            "ix_task_executions_unique_active",
+            "task_id",
+            unique=True,
+            postgresql_where=text(f"status NOT IN {str(FINAL_EXECUTION_STATUSES)}"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -155,6 +168,11 @@ class TaskExecution(Base):
     )
     inspection_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     adopted_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Token Usage Tracking (REQ-013)
+    total_tokens: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
     # Felder für Retry und Stale-Erkennung (Paket 09)
     next_retry_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -202,23 +220,23 @@ class TaskExecution(Base):
 
     @property
     def is_complete(self) -> bool:
-        """Check if the execution has completed (succeeded or failed)."""
-        return self.status in ("succeeded", "failed")
+        """Check if the execution has completed (done or failed)."""
+        return self.status in ("done", "failed")
 
     @property
     def is_successful(self) -> bool:
         """Check if the execution succeeded."""
-        return self.status in ("succeeded", "done")
+        return self.status == "done"
 
     @property
     def is_done(self) -> bool:
         """Check if the execution is in final state."""
-        return self.status in ("done", "failed", "review")
+        return self.status in FINAL_EXECUTION_STATUSES
 
     @property
     def is_active(self) -> bool:
         """Check if the execution is still active (not in final state)."""
-        return self.status not in ("done", "failed", "review")
+        return self.status not in FINAL_EXECUTION_STATUSES
 
     def to_dict(self) -> dict:
         """Convert execution to dictionary representation."""
@@ -250,6 +268,7 @@ class TaskExecution(Base):
             "has_uncommitted_changes": self.has_uncommitted_changes,
             "inspection_status": self.inspection_status,
             "adopted_commit_sha": self.adopted_commit_sha,
+            "total_tokens": self.total_tokens,
             "next_retry_at": self.next_retry_at.isoformat() if self.next_retry_at else None,
             "phase": self.phase,
             "max_execution_duration_seconds": self.max_execution_duration_seconds,

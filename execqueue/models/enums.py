@@ -33,6 +33,16 @@ class ExecutionStatus(str, Enum):
     FAILED = "failed"
 
 
+# Status groupings for consistent usage across model constraints and application code
+# These constants eliminate duplication and ensure consistency between database
+# constraints and application-level checks (REQ-012 quality improvement)
+FINAL_EXECUTION_STATUSES = ("done", "failed", "review")
+"""Terminal execution states that do not count as active."""
+
+ACTIVE_EXECUTION_STATUSES = ("prepared", "queued", "dispatching", "in_progress", "result_inspection", "adopting_commit")
+"""Active execution states that count as in-progress."""
+
+
 class EventDirection(str, Enum):
     """Direction of execution events.
 

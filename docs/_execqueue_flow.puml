@@ -2,7 +2,14 @@
 title ExecQueue – Event-getriebener Task Flow mit OpenCode Serve
 
 start
+<style>
+activity {
+  BackgroundColor #006400
+  FontColor white
+}
+</style>
 
+:task_type = requirement;
 :Artefakt wird erfasst;
 
 if (Artefakt-Typ gültig?) then (ja)
@@ -31,7 +38,7 @@ endif
 
 repeat
 
-  :Orchestrator-Trigger auslösen\n(Event driven);
+  :Orchestrator-Trigger auslösen\n;
   :Orchestrator prüft ausführbare Tasks;
 
   if (Ausführbare Tasks vorhanden?) then (ja)
@@ -84,7 +91,14 @@ repeat
         :Read-only / Analyse- / Planning-Kontext verwenden;
         :Keine Worktree-Isolation notwendig;
       endif
+      <style>
+activity {
+  BackgroundColor #F1F1F1
+  FontColor black
+}
+</style>
 
+:task_type = requirement;
       :Task Runner initialisieren;
       :OpenCode Session erzeugen;
       :session_id persistieren;
