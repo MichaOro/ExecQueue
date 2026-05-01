@@ -143,3 +143,134 @@ async def test_get_task_status_maps_unexpected_api_error_detail():
 
     assert success is False
     assert message == "Database temporarily unavailable."
+
+
+@pytest.mark.asyncio
+async def test_create_task_with_branch_parameter():
+    """Test task creation with branch parameter."""
+    client = TelegramAPIClient()
+    response = MagicMock()
+    response.status_code = 201
+    response.json.return_value = {"task_number": 43, "status": "backlog"}
+
+    with patch("httpx.AsyncClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=response)
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        success, message = await client.create_task(
+            task_type="planning",
+            prompt="Test with branch",
+            created_by_ref="123456",
+            branch="feature/test-branch"
+        )
+
+    assert success is True
+    assert message == "Aufgabe #43 wurde erstellt."
+    
+    # Verify payload included branch_name
+    call_args = mock_client.post.call_args
+    payload = call_args.kwargs["json"]
+    assert payload["branch_name"] == "feature/test-branch"
+
+
+@pytest.mark.asyncio
+async def test_create_task_without_branch_parameter():
+    """Test task creation without branch parameter."""
+    client = TelegramAPIClient()
+    response = MagicMock()
+    response.status_code = 201
+    response.json.return_value = {"task_number": 44, "status": "backlog"}
+
+    with patch("httpx.AsyncClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=response)
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        success, message = await client.create_task(
+            task_type="execution",
+            prompt="Test without branch",
+            created_by_ref="123456"
+        )
+
+    assert success is True
+    
+    # Verify payload did NOT include branch_name
+    call_args = mock_client.post.call_args
+    payload = call_args.kwargs["json"]
+    assert "branch_name" not in payload
+
+
+@pytest.mark.asyncio
+async def test_create_task_with_empty_branch_parameter():
+    """Test task creation with empty string branch (should be treated as None)."""
+    client = TelegramAPIClient()
+    response = MagicMock()
+    response.status_code = 201
+    response.json.return_value = {"task_number": 45, "status": "backlog"}
+
+    with patch("httpx.AsyncClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=response)
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        success, message = await client.create_task(
+            task_type="planning",
+            prompt="Test",
+            created_by_ref="123456",
+            branch=""  # Empty string
+        )
+
+    assert success is True
+    # Empty string should not be included in payload
+    call_args = mock_client.post.call_args
+    payload = call_args.kwargs["json"]
+    assert "branch_name" not in payload
+
+
+@pytest.mark.asyncio
+async def test_create_task_branch_validation_error():
+    """Test task creation with branch validation error."""
+    client = TelegramAPIClient()
+    response = MagicMock()
+    response.status_code = 422
+    response.json.return_value = {
+        "detail": "Branch 'invalid/branch' does not exist"
+    }
+
+    with patch("httpx.AsyncClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=response)
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        success, message = await client.create_task(
+            task_type="planning",
+            prompt="Test",
+            created_by_ref="123456",
+            branch="invalid/branch"
+        )
+
+    assert success is False
+    assert "Branch-Fehler" in message
+
+
+@pytest.mark.asyncio
+async def test_create_task_connect_error():
+    """Test task creation with connection error."""
+    import httpx
+    client = TelegramAPIClient()
+
+    with patch("httpx.AsyncClient") as mock_client_class:
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        success, message = await client.create_task(
+            task_type="planning",
+            prompt="Test",
+            created_by_ref="123456",
+            branch="feature/test"
+        )
+
+    assert success is False
+    assert "Verbindung zum Server nicht moeglich" in message

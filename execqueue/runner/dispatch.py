@@ -56,6 +56,20 @@ class DispatchError(Exception):
         super().__init__(message)
 
 
+class SessionInitializationError(Exception):
+    """Raised when session initialization fails."""
+
+    def __init__(
+        self,
+        message: str,
+        cause: Exception | None = None,
+        context: dict[str, Any] | None = None,
+    ):
+        self.cause = cause
+        self.context = context or {}
+        super().__init__(message)
+
+
 class PromptDispatcher:
     """Service for dispatching prompts to OpenCode.
 
@@ -71,6 +85,178 @@ class PromptDispatcher:
             opencode_client: OpenCode client instance (creates default if None)
         """
         self.opencode_client = opencode_client or OpenCodeClient()
+
+    async def initialize_session(
+        self,
+        session: Session,
+        execution_id: UUID,
+        context: PreparedExecutionContext,
+    ) -> TaskExecution:
+        """Initialize an OpenCode session for a prepared execution.
+
+        This method implements the REQ-012 initialization flow:
+        1. Verify execution is in QUEUED state
+        2. Create OpenCode session
+        3. Persist session_id to TaskExecution
+        4. Set status to IN_PROGRESS (without sending any prompt)
+        5. Log initialization with correlation ID
+
+        This is distinct from dispatch_prompt() which also sends a prompt.
+        The initialization prepares the session for subsequent prompt dispatch.
+
+        Args:
+            session: Database session
+            execution_id: TaskExecution ID to initialize
+            context: PreparedExecutionContext for session naming
+
+        Returns:
+            Updated TaskExecution with session_id and status=IN_PROGRESS
+
+        Raises:
+            SessionInitializationError: If initialization fails
+        """
+        # Get the execution
+        execution = session.get(TaskExecution, execution_id)
+        if not execution:
+            raise SessionInitializationError(
+                f"TaskExecution {execution_id} not found"
+            )
+
+        correlation_id = execution.correlation_id or "unknown"
+        task_id_str = str(execution.task_id)
+        execution_id_str = str(execution_id)
+
+        # Verify execution is in queued state
+        if execution.status != ExecutionStatus.QUEUED.value:
+            raise SessionInitializationError(
+                f"Execution must be in 'queued' state, current: {execution.status}"
+            )
+
+        # Log initialization start with structured data
+        log_phase_event(
+            obs_logger,
+            f"Initializing session for execution {execution_id_str}, task {task_id_str}",
+            correlation_id=correlation_id,
+            execution_id=execution_id_str,
+            task_id=task_id_str,
+            runner_id=execution.runner_id,
+            phase="session_init",
+        )
+
+        # Use phase timer for metrics
+        with measure_phase(
+            "session_init", correlation_id, obs_logger
+        ) as phase_metrics:
+            try:
+                # Create OpenCode session with named context
+                session_name = f"execqueue-task-{context.task_number}-v{context.version}"
+                opencode_session = await self.opencode_client.create_session(
+                    name=session_name
+                )
+
+                # Persist session_id and set status to IN_PROGRESS
+                execution.opencode_session_id = opencode_session.id
+                execution.status = ExecutionStatus.IN_PROGRESS.value
+                execution.started_at = datetime.now(timezone.utc)
+
+                # Store minimal context reference
+                execution.result_summary = {
+                    "context_version": context.version,
+                    "runner_mode": context.runner_mode.value,
+                    "initialized_at": execution.started_at.isoformat(),
+                    "session_name": session_name,
+                }
+
+                # Persist the initialization event with correlation ID
+                event = TaskExecutionEvent(
+                    task_execution_id=execution_id,
+                    sequence=self._get_next_sequence(session, execution_id),
+                    correlation_id=correlation_id,
+                    event_type=EventType.SESSION_INITIALIZED.value,
+                    payload={
+                        "opencode_session_id": opencode_session.id,
+                        "session_name": session_name,
+                        "context_version": context.version,
+                        "runner_mode": context.runner_mode.value,
+                        "initialized_at": execution.started_at.isoformat(),
+                    },
+                    created_at=datetime.now(timezone.utc),
+                    direction="outbound",
+                )
+                session.add(event)
+
+                log_phase_event(
+                    obs_logger,
+                    f"Session initialized for execution {execution_id_str}, "
+                    f"session {opencode_session.id}",
+                    correlation_id=correlation_id,
+                    execution_id=execution_id_str,
+                    task_id=task_id_str,
+                    runner_id=execution.runner_id,
+                    phase="session_init",
+                    session_id=opencode_session.id,
+                )
+
+                # Record phase duration metric
+                from execqueue.observability import record_phase_duration
+
+                record_phase_duration("session_init", phase_metrics.duration_seconds)
+
+                return execution
+
+            except Exception as e:
+                # On failure - do NOT set in_progress
+                error_msg = str(e)
+
+                # Log the error with structured data
+                log_phase_event(
+                    obs_logger,
+                    f"Failed to initialize session for execution {execution_id_str}: {error_msg}",
+                    correlation_id=correlation_id,
+                    execution_id=execution_id_str,
+                    task_id=task_id_str,
+                    runner_id=execution.runner_id,
+                    phase="session_init",
+                    level=logging.ERROR,
+                    error_type=type(e).__name__,
+                )
+
+                # Update execution with error info
+                execution.error_type = type(e).__name__
+                execution.error_message = error_msg
+
+                # Persist error event with correlation ID
+                event = TaskExecutionEvent(
+                    task_execution_id=execution_id,
+                    sequence=self._get_next_sequence(session, execution_id),
+                    correlation_id=correlation_id,
+                    event_type=EventType.ERROR.value,
+                    payload={
+                        "error_type": type(e).__name__,
+                        "error_message": error_msg,
+                        "failed_at": datetime.now(timezone.utc).isoformat(),
+                        "phase": "session_initialization",
+                    },
+                    created_at=datetime.now(timezone.utc),
+                    direction="outbound",
+                )
+                session.add(event)
+
+                # Record failure metric
+                from execqueue.observability import record_execution_failed
+
+                record_execution_failed()
+
+                # Raise as SessionInitializationError for caller handling
+                raise SessionInitializationError(
+                    f"Failed to initialize session: {error_msg}",
+                    cause=e,
+                    context={
+                        "execution_id": execution_id_str,
+                        "task_id": task_id_str,
+                        "context_version": context.version,
+                    },
+                ) from e
 
     async def dispatch_prompt(
         self,

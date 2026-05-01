@@ -2,6 +2,30 @@
 
 set -u
 
+# DETACH_MODE: Wenn nicht gesetzt, entkoppelt sich das Skript sofort, um Selbst-Terminierung zu vermeiden
+if [[ -z "${DETACH_MODE:-}" ]]; then
+    # Erstmalige Ausführung: Skript im Hintergrund neu starten
+    export DETACH_MODE=1
+    
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    OPS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    LOG_DIR="${OPS_DIR}/logs"
+    LOG_FILE="${LOG_DIR}/api.log"
+    
+    mkdir -p "${LOG_DIR}"
+    
+    printf '[api_restart] Detaching from parent process (DETACH_MODE=1).\n' >> "${LOG_FILE}" 2>&1
+    
+    # Skript asynchron starten mit setsid
+    setsid "${BASH_SOURCE[0]}" "$@" >> "${LOG_FILE}" 2>&1 &
+    DETACHED_PID=$!
+    
+    printf '[api_restart] Restart script detached with PID %s.\n' "${DETACHED_PID}" >> "${LOG_FILE}" 2>&1
+    
+    # Parent-Skript beenden
+    exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_ROOT="$(cd "${OPS_DIR}/.." && pwd)"
@@ -280,6 +304,7 @@ main() {
     fi
 
     log "API restart completed successfully."
+    log_to_file "API restart completed successfully. (DETACH_MODE=${DETACH_MODE})"
     exit 0
 }
 

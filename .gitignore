@@ -71,3 +71,6 @@ ops/pids/*.pid
 # Health module runtime files
 execqueue/health/*.json
 ops/health/*.json
+ops/scripts/mco/logs/*
+
+

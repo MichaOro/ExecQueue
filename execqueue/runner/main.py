@@ -22,11 +22,14 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from execqueue.db.session import get_db_session
+from execqueue.opencode.client import OpenCodeClient
 from execqueue.runner.config import RunnerConfig
+from execqueue.runner.dispatch import PromptDispatcher
 from execqueue.runner.polling import poll_and_claim_tasks
 from execqueue.runner.validator import Validator
 from execqueue.runner.watchdog import Watchdog
 from execqueue.models.task_execution import TaskExecution
+from execqueue.orchestrator.models import PreparedExecutionContext
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,7 @@ class Runner:
         self,
         config: RunnerConfig | None = None,
         validator: Validator | None = None,
+        opencode_client: OpenCodeClient | None = None,
     ):
         """Initialize the runner.
 
@@ -55,10 +59,13 @@ class Runner:
             config: Runner configuration. If None, creates default config.
             validator: Optional validator for execution results.
                       If None, no validation is performed.
+            opencode_client: Optional OpenCode client. If None, creates default client.
         """
         self.config = config or RunnerConfig.create_default()
         self._validator = validator
         self._watchdog = Watchdog(self.config)
+        self._opencode_client = opencode_client or OpenCodeClient()
+        self._dispatcher = PromptDispatcher(self._opencode_client)
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -174,6 +181,92 @@ class Runner:
 
         # Stop watchdog (idempotent)
         await self._watchdog.stop()
+
+    async def initialize_execution(
+        self, context: PreparedExecutionContext
+    ) -> TaskExecution | None:
+        """Initialize a task execution from a prepared context.
+
+        This method implements the REQ-012 initialization flow:
+        1. Claim the task (creates TaskExecution with status=QUEUED)
+        2. Initialize OpenCode session
+        3. Configure watchdog with session_id
+        4. Set status to IN_PROGRESS (without sending prompt)
+
+        Args:
+            context: PreparedExecutionContext from orchestrator
+
+        Returns:
+            The initialized TaskExecution, or None if initialization failed
+        """
+        from execqueue.runner.claim import claim_task
+
+        correlation_id = context.correlation_id or "unknown"
+        logger.info(
+            f"Initializing execution for task {context.task_number}, "
+            f"context version {context.version}",
+            extra={"correlation_id": correlation_id, "task_id": str(context.task_id)},
+        )
+
+        async with get_db_session() as session:
+            try:
+                # Step 1: Claim the task (creates TaskExecution with status=QUEUED)
+                # context.task_id is already a UUID, pass it directly
+                execution = claim_task(session, context.task_id, self.config.runner_id)
+                
+                logger.info(
+                    f"Claimed task {context.task_number}, execution {execution.id} in QUEUED state",
+                    extra={"correlation_id": correlation_id, "execution_id": str(execution.id)},
+                )
+
+                # Step 2: Initialize OpenCode session (sets status to IN_PROGRESS)
+                execution = await self._dispatcher.initialize_session(
+                    session, execution.id, context
+                )
+                
+                logger.info(
+                    f"Session initialized for execution {execution.id}, "
+                    f"session_id: {execution.opencode_session_id}",
+                    extra={"correlation_id": correlation_id, "execution_id": str(execution.id)},
+                )
+
+                # Step 3: Configure watchdog with session_id
+                self._watchdog.set_session_id(execution.opencode_session_id)
+                
+                # Start watchdog if enabled (it will only start if session_id is set)
+                if self.config.watchdog_enabled and not self._watchdog.is_running:
+                    await self._watchdog.start()
+                    logger.info(
+                        f"Watchdog started for session {execution.opencode_session_id}",
+                        extra={"correlation_id": correlation_id},
+                    )
+
+                # Step 4: Record initial activity for watchdog
+                self._watchdog.record_activity()
+
+                session.commit()
+
+                logger.info(
+                    f"Execution {execution.id} successfully initialized to IN_PROGRESS",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "execution_id": str(execution.id),
+                        "status": execution.status,
+                    },
+                )
+
+                return execution
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to initialize execution for task {context.task_number}: {e}",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "task_id": str(context.task_id),
+                    },
+                    exc_info=True,
+                )
+                return None
 
     async def claim_single_task(self, task_id: str) -> TaskExecution | None:
         """Claim a specific task (for event-driven usage).

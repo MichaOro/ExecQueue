@@ -14,11 +14,24 @@ from execqueue.db.session import create_session
 from execqueue.settings import get_settings
 from execqueue.workers.telegram import auth as telegram_auth
 from execqueue.workers.telegram.commands import (
+    CONFIRM_YES,
+    CONFIRM_NO,
     create_cancel,
     create_prompt,
     create_start,
     create_task_type,
     create_title,
+    create_branch_choice,
+    create_branch_select,
+    create_branch_name,
+    create_confirmation,
+    create_confirmation_keyboard,
+    create_task_type_callback,
+    branch_choice_callback,
+    branch_select_callback,
+    confirm_yes,
+    confirm_no,
+    CallbackQueryHandler,
     get_health_command_message,
     get_help_message,
     get_start_message,
@@ -66,6 +79,10 @@ PID_FILE = PROJECT_ROOT / "ops" / "pids" / "telegram_bot.pid"
 
 # Conversation states for /create (imported from commands but re-exported here for registration)
 from execqueue.workers.telegram.commands import (
+    BRANCH_CHOICE,
+    BRANCH_NAME,
+    BRANCH_SELECT,
+    CONFIRMATION,
     CREATE_PROMPT,
     CREATE_TASK_TYPE,
     CREATE_TITLE,
@@ -439,18 +456,35 @@ def create_bot_application(token: str, polling_timeout: int) -> Application:
     # Task-related commands
     application.add_handler(CommandHandler("status", status_command))
 
-    # /create conversation handler
+    # /create conversation handler with inline keyboard support
     create_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("create", create_start)],
         states={
             CREATE_TASK_TYPE: [
-                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_task_type)
+                CallbackQueryHandler(create_task_type_callback),  # Inline keyboard
+                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_task_type),  # Fallback
             ],
             CREATE_TITLE: [
                 MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_title)
             ],
             CREATE_PROMPT: [
                 MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_prompt)
+            ],
+            BRANCH_CHOICE: [
+                CallbackQueryHandler(branch_choice_callback),  # Inline keyboard
+                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_branch_choice),  # Fallback
+            ],
+            BRANCH_SELECT: [
+                CallbackQueryHandler(branch_select_callback),  # Inline keyboard
+                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_branch_select),  # Fallback
+            ],
+            BRANCH_NAME: [
+                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_branch_name)
+            ],
+            CONFIRMATION: [
+                CallbackQueryHandler(confirm_yes, pattern=CONFIRM_YES),
+                CallbackQueryHandler(confirm_no, pattern=CONFIRM_NO),
+                MessageHandler(Filters.TEXT & ~Filters.COMMAND, create_confirmation),  # Fallback
             ],
         },
         fallbacks=[CommandHandler("cancel", create_cancel)],

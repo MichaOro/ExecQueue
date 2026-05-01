@@ -5,9 +5,25 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from execqueue.workers.telegram.commands import (
+    BRANCH_CHOICE,
+    BRANCH_NAME,
+    BRANCH_SELECT,
+    CONFIRMATION,
+    CONFIRM_YES,
+    CONFIRM_NO,
     CREATE_PROMPT,
     CREATE_TASK_TYPE,
     CREATE_TITLE,
+    TYPE_REQUIREMENT,
+    branch_choice_callback,
+    branch_select_callback,
+    confirm_yes,
+    confirm_no,
+    create_branch_choice,
+    create_branch_name,
+    create_branch_select,
+    create_confirmation,
+    create_confirmation_keyboard,
     create_cancel,
     create_prompt,
     create_start,
@@ -102,7 +118,10 @@ class TestCreateCommand:
         assert "nicht leer" in update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_create_prompt_creates_task(self):
+    async def test_create_prompt_sets_prompt_and_returns_branch_select(self):
+        """Test that create_prompt stores the prompt and returns BRANCH_SELECT state."""
+        from execqueue.workers.telegram.commands import BRANCH_SELECT
+
         update = MagicMock()
         update.message = MagicMock()
         update.message.text = "Test prompt"
@@ -110,17 +129,15 @@ class TestCreateCommand:
         context = MagicMock()
         context.user_data = {"type": "planning", "created_by_ref": "123"}
 
-        with patch("execqueue.workers.telegram.commands.api_client") as mock_client:
-            mock_client.create_task = AsyncMock(return_value=(True, "Aufgabe #12 wurde erstellt."))
+        with patch("execqueue.workers.telegram.commands._show_existing_branches_direct", return_value=BRANCH_SELECT):
             result = await create_prompt(update, context)
 
-        assert result != CREATE_PROMPT
-        mock_client.create_task.assert_called_once_with(
-            task_type="planning",
-            prompt="Test prompt",
-            created_by_ref="123",
-            title=None,
-        )
+        # Should return BRANCH_SELECT state, not call create_task directly
+        assert result == BRANCH_SELECT
+        # Prompt should be stored in user_data
+        assert context.user_data["prompt"] == "Test prompt"
+        # create_task should NOT be called at this stage
+        # (it will be called later in create_confirmation or confirm_callback)
 
     @pytest.mark.asyncio
     async def test_create_cancel_clears_state(self):
@@ -264,3 +281,350 @@ class TestRestartFunctions:
 
         assert success is False
         assert "timed out" in message.lower()
+
+
+class TestBranchChoiceHandler:
+    @pytest.mark.asyncio
+    async def test_create_branch_choice_existing_branch(self):
+        """Test branch choice with existing branch selection."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "1"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {"type": TYPE_REQUIREMENT}
+        
+        with patch("execqueue.workers.telegram.commands.get_local_branches", return_value=["main", "develop"]):
+            result = await create_branch_choice(update, context)
+        
+        assert result == BRANCH_SELECT
+        update.message.reply_text.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_create_branch_choice_new_branch(self):
+        """Test branch choice with new branch creation."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "2"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {"type": TYPE_REQUIREMENT}
+        
+        result = await create_branch_choice(update, context)
+        
+        assert result == BRANCH_NAME
+        update.message.reply_text.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_create_branch_choice_invalid_input(self):
+        """Test branch choice with invalid input."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "3"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {"type": TYPE_REQUIREMENT}
+        
+        result = await create_branch_choice(update, context)
+        
+        assert result == BRANCH_CHOICE
+        update.message.reply_text.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_create_branch_choice_non_requirement_bypass(self):
+        """Test that non-requirement types bypass branch choice."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "1"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {"type": "planning"}
+        
+        with patch("execqueue.workers.telegram.commands._show_existing_branches_direct", return_value=BRANCH_SELECT):
+            result = await create_branch_choice(update, context)
+        
+        assert result == BRANCH_SELECT
+
+
+class TestBranchSelectHandler:
+    @pytest.mark.asyncio
+    async def test_create_branch_select_valid_selection(self):
+        """Test selecting a valid existing branch."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "1"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        with patch("execqueue.workers.telegram.commands.get_local_branches", return_value=["main", "develop"]):
+            result = await create_branch_select(update, context)
+        
+        assert result == CONFIRMATION
+        assert context.user_data["branch"] == "main"
+        assert "Zusammenfassung" in update.message.reply_text.call_args[0][0]
+        assert update.message.reply_text.call_args.kwargs["reply_markup"] is not None
+    
+    @pytest.mark.asyncio
+    async def test_create_branch_select_invalid_number(self):
+        """Test selecting an invalid branch number."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "99"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        with patch("execqueue.workers.telegram.commands.get_local_branches", return_value=["main", "develop"]):
+            result = await create_branch_select(update, context)
+        
+        assert result == BRANCH_SELECT
+    
+    @pytest.mark.asyncio
+    async def test_create_branch_select_cancel(self):
+        """Test cancelling branch selection."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "x"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        result = await create_branch_select(update, context)
+        
+        assert result == BRANCH_CHOICE
+
+
+class TestBranchNameHandler:
+    @pytest.mark.asyncio
+    async def test_create_branch_name_valid(self):
+        """Test creating a new branch with valid name."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "feature/my-feature"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        with patch("execqueue.workers.telegram.commands.validate_branch_name", return_value=True):
+            with patch("execqueue.workers.telegram.commands.create_branch", return_value=(True, "Branch created")):
+                result = await create_branch_name(update, context)
+        
+        assert result == CONFIRMATION
+        assert context.user_data["branch"] == "feature/my-feature"
+        assert "Zusammenfassung" in update.message.reply_text.call_args[0][0]
+        assert update.message.reply_text.call_args.kwargs["reply_markup"] is not None
+    
+    @pytest.mark.asyncio
+    async def test_create_branch_name_invalid(self):
+        """Test creating a branch with invalid name."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "invalid branch name"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        with patch("execqueue.workers.telegram.commands.validate_branch_name", return_value=False):
+            result = await create_branch_name(update, context)
+        
+        assert result == BRANCH_NAME
+    
+    @pytest.mark.asyncio
+    async def test_create_branch_name_empty(self):
+        """Test creating a branch with empty name."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "   "
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        result = await create_branch_name(update, context)
+        
+        assert result == BRANCH_NAME
+    
+    @pytest.mark.asyncio
+    async def test_create_branch_name_exists(self):
+        """Test creating a branch that already exists."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "main"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        with patch("execqueue.workers.telegram.commands.validate_branch_name", return_value=True):
+            with patch("execqueue.workers.telegram.commands.create_branch", return_value=(False, "Branch exists")):
+                result = await create_branch_name(update, context)
+        
+        assert result == BRANCH_NAME
+
+
+class TestConfirmationHandler:
+    @pytest.mark.asyncio
+    async def test_create_confirmation_yes(self):
+        """Test confirming task creation."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "y"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {
+            "type": "planning",
+            "prompt": "Test prompt",
+            "title": "Test title",
+            "branch": "main",
+            "created_by_ref": "123"
+        }
+        
+        with patch("execqueue.workers.telegram.commands.api_client") as mock_client:
+            mock_client.create_task = AsyncMock(return_value=(True, "Task created"))
+            result = await create_confirmation(update, context)
+        
+        assert result != CONFIRMATION
+        assert context.user_data == {}
+    
+    @pytest.mark.asyncio
+    async def test_create_confirmation_no(self):
+        """Test cancelling task creation."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "n"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {"type": "planning"}
+        
+        result = await create_confirmation(update, context)
+        
+        assert result != CONFIRMATION
+        assert context.user_data == {}
+    
+    @pytest.mark.asyncio
+    async def test_create_confirmation_api_timeout(self):
+        """Test handling API timeout during task creation."""
+        import httpx
+        
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "y"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {
+            "type": "planning",
+            "prompt": "Test prompt",
+            "created_by_ref": "123"
+        }
+        
+        with patch("execqueue.workers.telegram.commands.api_client") as mock_client:
+            mock_client.create_task = AsyncMock(side_effect=httpx.TimeoutException("timeout", request=MagicMock()))
+            result = await create_confirmation(update, context)
+        
+        assert result != CONFIRMATION
+        assert context.user_data == {}
+
+
+class TestCallbackHandlers:
+    @pytest.mark.asyncio
+    async def test_branch_choice_callback_existing(self):
+        """Test branch choice callback for existing branch."""
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = "existing"
+        update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {"type": TYPE_REQUIREMENT}
+        
+        with patch("execqueue.workers.telegram.commands._show_existing_branches_keyboard", return_value=BRANCH_SELECT):
+            result = await branch_choice_callback(update, context)
+        
+        assert result == BRANCH_SELECT
+    
+    @pytest.mark.asyncio
+    async def test_branch_choice_callback_new(self):
+        """Test branch choice callback for new branch."""
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = "new"
+        update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {"type": TYPE_REQUIREMENT}
+        
+        result = await branch_choice_callback(update, context)
+        
+        assert result == BRANCH_NAME
+    
+    @pytest.mark.asyncio
+    async def test_branch_select_callback_branch(self):
+        """Test branch select callback for branch selection."""
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = "branch:main"
+        update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        result = await branch_select_callback(update, context)
+        
+        assert result == CONFIRMATION
+        assert context.user_data["branch"] == "main"
+        assert "Zusammenfassung" in update.callback_query.edit_message_text.call_args[0][0]
+        assert update.callback_query.edit_message_text.call_args.kwargs["reply_markup"] is not None
+    
+    @pytest.mark.asyncio
+    async def test_branch_select_callback_back(self):
+        """Test branch select callback for back navigation."""
+        from execqueue.workers.telegram.commands import BRANCH_BACK
+        
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = BRANCH_BACK
+        update.callback_query.answer = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+        
+        with patch("execqueue.workers.telegram.commands._show_branch_choice_keyboard", return_value=BRANCH_CHOICE):
+            result = await branch_select_callback(update, context)
+        
+        assert result == BRANCH_CHOICE
+    
+    @pytest.mark.asyncio
+    async def test_confirm_yes_callback(self):
+        """Test confirm_yes callback for yes."""
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = CONFIRM_YES
+        update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {
+            "type": "planning",
+            "prompt": "Test prompt",
+            "created_by_ref": "123"
+        }
+        
+        with patch("execqueue.workers.telegram.commands.api_client") as mock_client:
+            mock_client.create_task = AsyncMock(return_value=(True, "Task created"))
+            result = await confirm_yes(update, context)
+        
+        assert result != CONFIRMATION
+        assert context.user_data == {}
+    
+    @pytest.mark.asyncio
+    async def test_confirm_no_callback(self):
+        """Test confirm_no callback for no."""
+        update = MagicMock()
+        update.callback_query = MagicMock()
+        update.callback_query.data = CONFIRM_NO
+        update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {"type": "planning"}
+        
+        result = await confirm_no(update, context)
+        
+        assert result != CONFIRMATION
+        assert context.user_data == {}

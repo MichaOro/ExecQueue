@@ -83,3 +83,4 @@ class EventType(str, Enum):
     COMMIT_ADOPTION_CONFLICT = "commit.adoption_conflict"
     RETRY_SCHEDULED = "retry.scheduled"
     RETRY_EXHAUSTED = "retry.exhausted"
+    SESSION_INITIALIZED = "session.initialized"

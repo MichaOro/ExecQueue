@@ -62,10 +62,10 @@ class TaskExecutionEvent(Base):
             "event_type IN ('started', 'progress', 'completed', 'error', 'status_update', "
             "'execution.claimed', 'execution.dispatched', 'execution.started', "
             "'execution.completed', 'execution.failed', 'session.created', 'session.closed', "
-            "'message.sent', 'message.received', 'stream.connected', 'stream.disconnected', "
-            "'stream.heartbeat', 'result.inspected', 'commit.adoption_started', "
-            "'commit.adoption_success', 'commit.adoption_conflict', 'retry.scheduled', "
-            "'retry.exhausted')",
+            "'session.initialized', 'message.sent', 'message.received', 'stream.connected', "
+            "'stream.disconnected', 'stream.heartbeat', 'result.inspected', "
+            "'commit.adoption_started', 'commit.adoption_success', 'commit.adoption_conflict', "
+            "'retry.scheduled', 'retry.exhausted')",
             name="ck_task_execution_events_event_type_allowed",
         ),
         # Unique Constraint für Event-Deduplizierung (Paket 01)

@@ -140,6 +140,24 @@ The current API does not require context headers. To keep later shared domain
 endpoints forward-compatible, `X-Tenant-ID` is the reserved request header
 convention for future tenant-aware handlers under `/api`.
 
+### Available Agents (OpenCode Integration)
+
+ExecQueue provides six specialized agents for different phases of the development workflow:
+
+| Agent | Purpose |
+|-------|---------|
+| `python-backend-task` | Implement or refactor Python backend code |
+| `fastapi-route-task` | Add or change FastAPI routes |
+| `pytest-task` | Expand or repair the pytest suite |
+| `ops-debug-task` | Inspect operational scripts and logs |
+| `requirements-engineer-task` | Create structured requirement artifacts from stakeholder input |
+| `technical-requirements-engineer-task` | Translate requirements into technical specs and code snippets |
+
+To use an agent, invoke it via the OpenCode interface with the corresponding skill name.
+Example: "Use `requirements-engineer-task` to create a user story for multi-tenant task isolation."
+
+Detailed skill definitions are located in `.opencode/skills/`.
+
 ## Runner (REQ-012)
 
 The Runner module handles task execution polling, claiming, and processing.

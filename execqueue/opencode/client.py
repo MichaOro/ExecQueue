@@ -8,6 +8,7 @@ error categorization as specified in REQ-012-04.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import AsyncIterator
 from urllib.parse import urljoin
@@ -516,6 +517,51 @@ class OpenCodeClient:
                             pass
         except httpx.TimeoutException as e:
             raise OpenCodeTimeoutError("SSE stream timed out") from e
+        except httpx.ConnectError as e:
+            raise OpenCodeConnectionError(
+                f"Failed to connect to OpenCode at {url}"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            raise OpenCodeAPIError(e.response.status_code, str(e)) from e
+
+    async def close_session(self, session_id: str) -> bool:
+        """Close a session and release its resources.
+
+        Args:
+            session_id: Session ID to close
+
+        Returns:
+            True if session was closed successfully
+
+        Raises:
+            OpenCodeConnectionError: If connection fails
+            OpenCodeTimeoutError: If request times out
+            OpenCodeAPIError: If session closure fails
+
+        Note:
+            This endpoint is UNVERIFIED. If it returns 404, sessions
+            may be automatically garbage collected after inactivity.
+        """
+        url = urljoin(self.base_url, f"/sessions/{session_id}")
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.delete(url)
+
+                if response.status_code == 404:
+                    # Session endpoint may not exist - sessions might be
+                    # auto-collected, so we consider this a success
+                    logger = logging.getLogger(__name__)
+                    logger.debug(
+                        f"Session {session_id} not found (may be auto-collected)"
+                    )
+                    return True
+
+                response.raise_for_status()
+                return True
+        except httpx.TimeoutException as e:
+            raise OpenCodeTimeoutError(
+                f"Session close timed out after {self.timeout_ms}ms"
+            ) from e
         except httpx.ConnectError as e:
             raise OpenCodeConnectionError(
                 f"Failed to connect to OpenCode at {url}"

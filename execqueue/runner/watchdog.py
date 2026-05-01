@@ -81,6 +81,19 @@ class Watchdog:
         self._last_activity_time = time.monotonic()
         logger.debug("Watchdog activity recorded")
 
+    def set_session_id(self, session_id: str) -> None:
+        """Set the OpenCode session ID for watchdog keep-alive.
+
+        This method allows dynamically setting the session ID after
+        the Watchdog is created, enabling the initialization flow where
+        the session is created before the watchdog is started.
+
+        Args:
+            session_id: OpenCode session ID to use for keep-alive pings
+        """
+        self.config.watchdog_session_id = session_id
+        logger.debug(f"Watchdog session_id set to {session_id}")
+
     async def start(self) -> None:
         """Start the watchdog.
 

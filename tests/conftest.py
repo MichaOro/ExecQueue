@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -54,3 +55,20 @@ def clear_runtime_caches():
         get_session_factory.cache_clear()
         get_engine.cache_clear()
         get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def stub_task_orchestrator_trigger(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    """Prevent ordinary tests from triggering the real orchestrator on task creation.
+
+    Tests that explicitly verify trigger_orchestrator() itself keep the real implementation.
+    """
+    if request.node.module.__name__.endswith("test_orchestrator_trigger"):
+        yield
+        return
+
+    monkeypatch.setattr(
+        "execqueue.tasks.service.trigger_orchestrator",
+        MagicMock(return_value=True),
+    )
+    yield
