@@ -23,7 +23,7 @@
       }
     }
   },
-  "model": "adesso/qwen-3.5-122b-sovereign",
+  "model": "openrouter/nvidia/nemotron-3-super-120b-a12b",
   "small_model": "gpt-oss-120b-sovereign",
   "default_agent": "build",
   "share": "disabled",
@@ -46,7 +46,7 @@
   "compaction": {
     "auto": true,
     "prune": true,
-    "reserved": 12000
+    "reserved": 20000
   },
   "permission": {
     "*": "allow",
@@ -63,8 +63,8 @@
     "bash": {
       "*": "allow"
     },
-    "git_*": "allow",
-    "postgres_*": "allow"
+    "git_*": "deny",
+    "postgres_*": "deny"
   },
   "mcp": {
     "filesystem": {
@@ -112,7 +112,7 @@
     "build": {
       "description": "Primary delivery agent for ExecQueue. Writes directly into the project while staying within the local worktree and repo safety rules.",
       "mode": "primary",
-      "model": "adesso/qwen-3.5-122b-sovereign",
+      "model": "openrouter/nvidia/nemotron-3-super-120b-a12b",
       "temperature": 0.2,
       "prompt": "{file:./.opencode/prompts/build.md}",
       "permission": {
@@ -120,65 +120,77 @@
         "bash": {
           "*": "allow"
         },
-        "task": "allow",
-        "git_*": "allow",
-        "postgres_*": "allow"
+        "task": "allow"
       }
     },
     "plan": {
       "description": "Primary planning agent for analysis, architecture thinking, and safe recommendations without changing files.",
       "mode": "primary",
-      "model": "adesso/qwen-3.5-122b-sovereign",
+      "model": "openrouter/nvidia/nemotron-3-super-120b-a12b",
       "temperature": 0.1,
       "prompt": "{file:./.opencode/prompts/plan.md}",
       "permission": {
-        "edit": "allow",
+        "edit": "deny",
         "bash": {
           "*": "allow"
         },
-        "git_*": "allow",
-        "postgres_*": "allow"
+        "git_*": "deny",
+        "postgres_*": "deny"
       }
     },
     "review": {
       "description": "Read-only review subagent focused on bugs, regressions, missing tests, and maintainability.",
       "mode": "subagent",
-      "model": "adesso/qwen-3.5-122b-sovereign",
+      "model": "openrouter/nvidia/nemotron-3-super-120b-a12b",
       "temperature": 0.1,
       "prompt": "{file:./.opencode/prompts/review.md}",
       "permission": {
-        "edit": "allow",
-        "bash": {
-          "*": "allow"
-        },
-        "git_*": "allow",
-        "postgres_*": "allow"
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "git_*": "deny",
+        "postgres_*": "deny"
       }
     },
     "db-inspector": {
       "description": "Subagent for schema and data inspection through the postgres MCP, intended for read-only exploration.",
       "mode": "subagent",
-      "model": "adesso/qwen-3.5-122b-sovereign",
+      "model": "openrouter/nvidia/nemotron-3-super-120b-a12b",
       "temperature": 0.0,
       "prompt": "{file:./.opencode/prompts/db-inspector.md}",
       "permission": {
         "postgres_*": "allow",
-        "edit": "allow",
-        "bash": "allow",
-        "git_*": "allow"
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "git_*": "deny"
       }
     },
     "db-writer": {
       "description": "Subagent for explicit database write operations. Always requires approval before using Postgres MCP tools.",
       "mode": "subagent",
-      "model": "adesso/qwen-3.5-122b-sovereign",
+      "model": "openrouter/nvidia/nemotron-3-super-120b-a12b",
       "temperature": 0.0,
       "prompt": "{file:./.opencode/prompts/db-writer.md}",
       "permission": {
         "postgres_*": "allow",
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "git_*": "deny"
+      }
+    },
+    "context-curator": {
+      "description": "Subagent for phase-based context compression and continuation-safe state updates. Never implements code.",
+      "mode": "subagent",
+      "model": "adesso/gpt-oss-120b-sovereign",
+      "temperature": 0.0,
+      "prompt": "You are a context curator for ExecQueue. Your only job is to create or refresh a continuation-safe working state. Do not implement code, do not invent facts, and prefer repository truth over session memory. Keep outputs compact, structured, and restart-friendly.",
+      "permission": {
         "edit": "allow",
-        "bash": "allow",
-        "task": "allow",
+        "bash": {
+          "*": "allow"
+        },
         "git_*": "allow"
       }
     }

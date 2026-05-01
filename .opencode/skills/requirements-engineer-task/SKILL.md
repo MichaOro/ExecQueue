@@ -8,12 +8,12 @@ Use this skill when transforming high-level requests or stakeholder descriptions
 Workflow:
 
 1. **Clarify Input**: Ask the user for the raw requirement description, target system context, and any known constraints.
-2. **Extract Entities**: Use `explore` to identify relevant domain concepts in the existing code base (e.g., `execqueue/` packages, models, API routes).
+2. **Extract Entities**: Inspect the existing code base with normal repository search and file reads to identify relevant domain concepts (e.g., `execqueue/` packages, models, API routes, runner and orchestrator modules).
 3. **Structure the Artifact**:
    - Create a **User Story** in the format: "As a [role], I want [feature] so that [benefit]."
    - Define **Acceptance Criteria** (Given/When/Then format) with clear pass/fail conditions.
    - Optionally add **Non-Functional Requirements** (performance, security, availability).
-4. **Validate Consistency**: Cross-check with existing code using `grep` to ensure no contradictions with current architecture.
+4. **Validate Consistency**: Cross-check with existing code using repository search to ensure no contradictions with current architecture.
 5. **Output Format**: Return a structured markdown block with:
    - Title
    - User Story
@@ -24,15 +24,14 @@ Workflow:
 Checks:
 
 - Are acceptance criteria testable and unambiguous?
-- Do the requirements align with the project's bootstrap stage (avoid over-engineering)?
+- Do the requirements align with the project's current architecture and delivery priorities without over-engineering?
 - Is the artifact concise enough for direct use in planning or review?
 
-MCP Integration:
+Recommended tools:
 
-- `explore`: Discover relevant code areas and domain models.
-- `grep`: Verify terminology and detect potential conflicts.
-- `sequential-thinking`: Structure the requirement elicitation and validation steps.
-- `question`: Ask clarifying questions when stakeholder input is ambiguous.
+- repository search and file reads to discover relevant code areas and domain models
+- `sequential-thinking` to structure the requirement elicitation and validation steps
+- concise clarification questions only when stakeholder input is genuinely ambiguous
 
 Output Example:
 

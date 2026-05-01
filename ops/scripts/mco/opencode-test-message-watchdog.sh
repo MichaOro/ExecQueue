@@ -120,6 +120,11 @@ now_epoch() {
   date +%s
 }
 
+log_watchdog() {
+  local msg="$1"
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${msg}" | tee -a "${WATCHDOG_LOG_FILE}" >&2
+}
+
 # Optional: Aufräumen von verwaisten State-Directories älter als MAX_RUNTIME_SECONDS
 cleanup_orphan_states() {
   local max_age="${1:-3600}"
@@ -168,11 +173,6 @@ if [[ -n "${OPENCODE_SERVER_PASSWORD:-}" ]]; then
   AUTH_USER="${OPENCODE_SERVER_USERNAME:-opencode}"
   AUTH_ARGS=(-u "${AUTH_USER}:${OPENCODE_SERVER_PASSWORD}")
 fi
-
-log_watchdog() {
-  local msg="$1"
-  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${msg}" | tee -a "${WATCHDOG_LOG_FILE}" >&2
-}
 
 write_state_file() {
   # Defensive State-Write: Background-Prozesse können beim Shutdown noch kurz laufen.

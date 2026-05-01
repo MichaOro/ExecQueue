@@ -12,6 +12,7 @@ Quality bar:
 
 - follow the loaded AGENTS and instruction files
 - preserve the current Python package layout and FastAPI organization
+- account for the existing runner, orchestrator, workflow, observability, and Telegram integration layers when assessing change impact
 - add or update focused pytest coverage when behavior changes
 - run relevant validation, usually `pytest`, when the change warrants it
 - explain what changed, what was verified, and what remains unverified

@@ -1,6 +1,6 @@
 # ExecQueue Engineering Rules
 
-- Treat this repository as an early-stage Python 3.10+ backend with a minimal FastAPI surface and a still-light architecture.
+- Treat this repository as a growing Python 3.10+ backend with FastAPI, orchestrator, runner, OpenCode integration, observability, and Telegram worker surfaces already in play.
 - Keep production code in the existing package layout under `execqueue/`; do not introduce a `src/` layout unless the repository explicitly moves there.
 - Prefer small, concrete modules over speculative abstractions. Add a new abstraction only when there are at least two clear call sites or a real testing need.
 - Preserve the current API organization:
@@ -12,4 +12,4 @@
 - Keep FastAPI additions forward-compatible: lightweight request models, explicit response shapes, and minimal hidden magic.
 - If a change affects installation, runtime dependencies, or test tooling, update `pyproject.toml`.
 - If a change affects setup or operator workflow, update `README.md`.
-- Prefer the smallest coherent change that leaves the codebase easier to extend than before.
+- Prefer the smallest coherent change that leaves the codebase easier to extend than before, but do not underestimate cross-module effects in runner, orchestrator, workflow, and worker code.

@@ -140,11 +140,18 @@ The current API does not require context headers. To keep later shared domain
 endpoints forward-compatible, `X-Tenant-ID` is the reserved request header
 convention for future tenant-aware handlers under `/api`.
 
-### Available Agents (OpenCode Integration)
+### OpenCode Workflow Assets
 
-ExecQueue provides six specialized agents for different phases of the development workflow:
+ExecQueue currently uses:
 
-| Agent | Purpose |
+- primary agents: `build`, `plan`
+- subagents: `review`, `db-inspector`, `db-writer`, `context-curator`
+- project skills under `.opencode/skills/`
+- custom command: `/compact-state`
+
+Current project skills:
+
+| Skill | Purpose |
 |-------|---------|
 | `python-backend-task` | Implement or refactor Python backend code |
 | `fastapi-route-task` | Add or change FastAPI routes |
@@ -152,11 +159,14 @@ ExecQueue provides six specialized agents for different phases of the developmen
 | `ops-debug-task` | Inspect operational scripts and logs |
 | `requirements-engineer-task` | Create structured requirement artifacts from stakeholder input |
 | `technical-requirements-engineer-task` | Translate requirements into technical specs and code snippets |
+| `context-curator` | Create compact continuation-safe state for long sessions |
 
-To use an agent, invoke it via the OpenCode interface with the corresponding skill name.
-Example: "Use `requirements-engineer-task` to create a user story for multi-tenant task isolation."
+Examples:
 
-Detailed skill definitions are located in `.opencode/skills/`.
+- "Use `requirements-engineer-task` to create a user story for multi-tenant task isolation."
+- "Run `/compact-state` before restarting the session."
+
+Detailed prompts, skills, and commands are located in `.opencode/`.
 
 ## Runner (REQ-012)
 
