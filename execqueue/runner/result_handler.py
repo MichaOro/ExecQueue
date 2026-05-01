@@ -1,212 +1,164 @@
-"""Result handling and persistence for REQ-016."""
+"""Result handling and workflow status persistence for REQ-016/REQ-017."""
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
-if TYPE_CHECKING:
-    from execqueue.db.models import TaskExecution, TaskExecutionEvent
-    from execqueue.runner.workflow_executor import TaskResult
+from execqueue.db.models import Task, TaskStatus
+from execqueue.models.enums import EventDirection, ExecutionStatus
+from execqueue.models.task_execution import TaskExecution
+from execqueue.models.task_execution_event import TaskExecutionEvent
+from execqueue.orchestrator.workflow_repo import WorkflowRepository
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from execqueue.runner.workflow_executor import TaskResult
+
+
+def utcnow() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(timezone.utc)
+
 
 class ResultHandler:
-    """Handles persistence and aggregation of task results.
-
-    Usage:
-        async with get_db_session() as session:
-            handler = ResultHandler(session)
-            handler.persist_results(workflow_id, task_results)
-            workflow_status = handler.aggregate_workflow_status(workflow_id)
-    """
+    """Handles persistence and aggregation of task execution results."""
 
     def __init__(self, session: Session):
-        """Initialize result handler.
-
-        Args:
-            session: Database session for persistence (must be managed by caller)
-        """
         self._session = session
+        self._workflow_repo = WorkflowRepository()
 
     def persist_results(
         self,
         workflow_id: UUID,
         task_results: list["TaskResult"],
     ) -> None:
-        """Persist task results to database.
-
-        Args:
-            workflow_id: Workflow identifier
-            task_results: List of TaskResult to persist
-
-        Note:
-            All results are persisted in a single transaction.
-            If any result fails to persist, the entire transaction is rolled back.
-        """
         try:
+            persisted_any = False
+
             for result in task_results:
-                # Get existing TaskExecution (created by Orchestrator)
                 execution = self._get_execution(result.task_id)
                 if not execution:
                     logger.warning(
-                        f"TaskExecution not found for task {result.task_id}, "
-                        f"skipping persistence"
+                        "TaskExecution not found for task %s, skipping persistence",
+                        result.task_id,
                     )
                     continue
 
-                # Update execution with result data
-                self._update_execution_from_result(execution, result)
+                if execution.workflow_id is None:
+                    execution.workflow_id = workflow_id
 
-                # Log event for this result
+                self._update_execution_from_result(execution, result)
                 self._log_event(
                     execution=execution,
-                    event_type="task_result",
+                    event_type="status_update",
                     data={
                         "status": result.status,
                         "duration_seconds": result.duration_seconds,
                         "error_message": result.error_message,
                     },
                 )
+                persisted_any = True
 
-                logger.info(
-                    f"Persisted result for task {result.task_id}: "
-                    f"status={result.status}, "
-                    f"commit_sha={result.commit_sha}"
-                )
+            if not persisted_any:
+                logger.info("No task results persisted for workflow %s", workflow_id)
+                return
 
-            # Commit all changes atomically
             self._session.commit()
-            logger.info(f"Persisted {len(task_results)} results for workflow {workflow_id}")
+            self._workflow_repo.check_and_update_workflow_status(self._session, workflow_id)
+            logger.info("Persisted %d results for workflow %s", len(task_results), workflow_id)
 
-        except Exception as e:
-            # Rollback on error
+        except Exception as exc:
             self._session.rollback()
-            logger.error(f"Failed to persist results: {e}", exc_info=True)
+            logger.error("Failed to persist results: %s", exc, exc_info=True)
             raise
 
     def aggregate_workflow_status(
         self,
         workflow_id: UUID,
     ) -> str:
-        """Aggregate task results to determine workflow status.
-
-        Args:
-            workflow_id: Workflow identifier
-
-        Returns:
-            Workflow status: 'running', 'done', or 'failed'
-        """
         from execqueue.orchestrator.workflow_models import WorkflowStatus
-        from execqueue.db.models import TaskExecution
 
-        # Get all TaskExecutions for this workflow
-        executions = self._session.query(TaskExecution).filter(
-            TaskExecution.workflow_id == workflow_id
-        ).all()
+        summary = self._workflow_repo.get_workflow_task_summary(self._session, workflow_id)
+        return self._workflow_repo.calculate_workflow_status(summary).value
 
-        if not executions:
-            logger.warning(f"No TaskExecutions found for workflow {workflow_id}")
-            return WorkflowStatus.DONE.value  # Empty workflow
-
-        # Check execution statuses
-        done_count = sum(1 for e in executions if e.status == "done")
-        failed_count = sum(1 for e in executions if e.status == "failed")
-
-        if failed_count > 0:
-            return WorkflowStatus.FAILED.value
-        elif done_count == len(executions):
-            return WorkflowStatus.DONE.value
-        else:
-            return WorkflowStatus.RUNNING.value
-
-    def _get_execution(self, task_id: UUID) -> "TaskExecution | None":
-        """Get existing TaskExecution for a task.
-
-        Args:
-            task_id: Task identifier
-
-        Returns:
-            TaskExecution or None if not found
-
-        Note:
-            TaskExecution should have been created by Orchestrator before execution.
-        """
-        from execqueue.db.models import TaskExecution
-
+    def _get_execution(self, task_id: UUID) -> TaskExecution | None:
         return (
             self._session.query(TaskExecution)
             .filter(TaskExecution.task_id == task_id)
+            .order_by(TaskExecution.created_at.desc())
             .first()
         )
 
     def _update_execution_from_result(
         self,
-        execution: "TaskExecution",
+        execution: TaskExecution,
         result: "TaskResult",
     ) -> None:
-        """Update TaskExecution from TaskResult.
-
-        Args:
-            execution: TaskExecution to update
-            result: TaskResult with new data
-        """
-        # Map status
         if result.status == "DONE":
-            execution.status = "done"
+            execution.status = ExecutionStatus.DONE.value
+            execution.finished_at = utcnow()
+            self._set_task_status(execution.task_id, TaskStatus.COMPLETED.value)
         elif result.status == "FAILED":
-            execution.status = "failed"
+            execution.status = ExecutionStatus.FAILED.value
+            execution.finished_at = utcnow()
+            self._set_task_status(execution.task_id, TaskStatus.FAILED.value)
         elif result.status == "RETRY":
-            execution.status = "prepared"  # Reset for retry
+            execution.status = ExecutionStatus.PREPARED.value
+            execution.finished_at = None
+            self._set_task_status(execution.task_id, TaskStatus.PREPARED.value)
 
-        # Update commit SHA
         if result.commit_sha:
             execution.commit_sha_after = result.commit_sha
-
-        # Update worktree path
         if result.worktree_path:
             execution.worktree_path = result.worktree_path
-
-        # Update session ID
         if result.opencode_session_id:
             execution.opencode_session_id = result.opencode_session_id
-
-        # Update error message
         if result.error_message:
             execution.error_message = result.error_message
 
-        # Update duration
-        if result.duration_seconds:
-            # Store as part of result_summary JSON
-            if execution.result_summary is None:
-                execution.result_summary = {}
+        if execution.result_summary is None:
+            execution.result_summary = {}
+        if result.duration_seconds is not None:
             execution.result_summary["duration_seconds"] = result.duration_seconds
+        if result.result_payload is not None:
+            execution.result_summary["result_payload"] = result.result_payload
+        flag_modified(execution, "result_summary")
 
-        execution.updated_at = datetime.utcnow()
+        execution.updated_at = utcnow()
+
+    def _set_task_status(self, task_id: UUID, status: str) -> None:
+        task = self._session.get(Task, task_id)
+        if task is not None:
+            task.status = status
+            task.updated_at = utcnow()
 
     def _log_event(
         self,
-        execution: "TaskExecution",
+        execution: TaskExecution,
         event_type: str,
         data: dict | None = None,
     ) -> None:
-        """Log a TaskExecutionEvent.
-
-        Args:
-            execution: Related TaskExecution
-            event_type: Event type string
-            data: Optional event data (JSON)
-        """
-        from execqueue.db.models import TaskExecutionEvent
+        latest_sequence = (
+            self._session.query(TaskExecutionEvent.sequence)
+            .filter(TaskExecutionEvent.task_execution_id == execution.id)
+            .order_by(TaskExecutionEvent.sequence.desc())
+            .first()
+        )
+        next_sequence = 1 if latest_sequence is None else latest_sequence[0] + 1
 
         event = TaskExecutionEvent(
             task_execution_id=execution.id,
+            sequence=next_sequence,
+            direction=EventDirection.OUTBOUND.value,
             event_type=event_type,
-            data=data or {},
+            payload=data or {},
+            correlation_id=execution.correlation_id,
         )
         self._session.add(event)

@@ -125,7 +125,7 @@ class TestWorkflowORM:
 
     def test_workflow_status_constraint(self):
         """Verify Workflow has status check constraint."""
-        constraints = Workflow.__table_args__
+        constraints = [c for c in Workflow.__table_args__ if hasattr(c, "sqltext")]
         assert len(constraints) == 1
         constraint = constraints[0]
         # Naming convention in base.py adds ck_%(table_name)s_ prefix

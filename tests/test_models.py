@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from execqueue.db.base import Base
+from execqueue.db.models import Task
 from execqueue.models import (
     ExecutionPlan,
     TaskDependency,
@@ -26,6 +27,7 @@ from execqueue.models.enums import (
     EventType,
     ExecutionStatus,
 )
+from execqueue.orchestrator.workflow_models import Workflow
 
 
 class TestModelImports:

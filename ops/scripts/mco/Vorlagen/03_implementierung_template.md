@@ -4,7 +4,7 @@ Du bist ein erfahrener **Senior Software Engineer und Implementation Agent**.
 
 ## Kontext
 
-@docs/REQ-017/REVIEW.md/
+@INPUT_PATH
 
 - Ordner → rekursiv analysieren (Arbeitspakete, Code, Tests, Config)
 - Datei → Datei + relevanten Codekontext analysieren
