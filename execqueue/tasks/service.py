@@ -11,8 +11,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from execqueue.db.models import Requirement, RequirementStatus, Task
-from execqueue.orchestrator_trigger import trigger_orchestrator
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_TASK_MAX_RETRIES = 3
@@ -156,15 +154,6 @@ def create_task(
         task.type,
         task.requirement_id,
     )
-
-    # Trigger orchestrator after successful persistence (AP 4)
-    # Trigger failures are logged but do not affect the task
-    if not trigger_orchestrator(session, task):
-        logger.warning(
-            "Task creation completed without orchestrator confirmation: task_number=%s, type=%s",
-            task.task_number,
-            task.type,
-        )
 
     return task
 
@@ -357,14 +346,5 @@ def create_task_from_requirement(
         task.task_number,
         task.type,
     )
-
-    # Trigger orchestrator after successful persistence (AP 4)
-    # Trigger failures are logged but do not affect the task/requirement
-    if not trigger_orchestrator(session, task):
-        logger.warning(
-            "Requirement intake completed without orchestrator confirmation: requirement_id=%s, task_number=%s",
-            requirement.id,
-            task.task_number,
-        )
 
     return requirement, task

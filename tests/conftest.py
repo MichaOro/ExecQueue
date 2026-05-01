@@ -70,5 +70,6 @@ def stub_task_orchestrator_trigger(monkeypatch: pytest.MonkeyPatch, request: pyt
     monkeypatch.setattr(
         "execqueue.tasks.service.trigger_orchestrator",
         MagicMock(return_value=True),
+        raising=False,
     )
     yield

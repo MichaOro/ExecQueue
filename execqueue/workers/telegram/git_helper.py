@@ -50,8 +50,8 @@ def get_local_branches(
     """
     if repo_path is None:
         repo_path = Path.cwd()
-    
-    repo_path = Path(repo_path).resolve()
+    else:
+        repo_path = Path(repo_path).resolve()
     
     if not repo_path.exists():
         raise GitRepositoryError(f"Repository path does not exist: {repo_path}")
@@ -83,6 +83,56 @@ def get_local_branches(
             branches.append(branch_name)
     
     return branches
+
+
+def get_current_branch(
+    repo_path: Path | None = None,
+    timeout: int = 5,
+) -> str:
+    """Return the currently active local branch name.
+
+    Args:
+        repo_path: Path to the Git repository. If None, uses the current directory.
+        timeout: Timeout in seconds for the Git command.
+
+    Returns:
+        The current branch name.
+
+    Raises:
+        GitRepositoryError: If the repository is not accessible, detached, or invalid.
+        GitTimeoutError: If the Git command times out.
+    """
+    if repo_path is None:
+        repo_path = Path.cwd()
+    else:
+        repo_path = Path(repo_path).resolve()
+
+    if not repo_path.exists():
+        raise GitRepositoryError(f"Repository path does not exist: {repo_path}")
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise GitTimeoutError(f"Git command timed out after {timeout} seconds") from e
+
+    if result.returncode != 0:
+        error_detail = result.stderr.strip() or "unknown error"
+        raise GitRepositoryError(f"Failed to determine current branch: {error_detail}")
+
+    branch_name = result.stdout.strip()
+    if not branch_name or branch_name == "HEAD":
+        raise GitRepositoryError(
+            "Failed to determine current branch: repository is in detached HEAD state"
+        )
+
+    return branch_name
 
 
 def validate_branch_name(name: str) -> bool:
@@ -164,8 +214,8 @@ def branch_exists(
     """
     if repo_path is None:
         repo_path = Path.cwd()
-    
-    repo_path = Path(repo_path).resolve()
+    else:
+        repo_path = Path(repo_path).resolve()
     
     if not repo_path.exists():
         raise GitRepositoryError(f"Repository path does not exist: {repo_path}")
@@ -229,8 +279,8 @@ def create_branch(
     """
     if repo_path is None:
         repo_path = Path.cwd()
-    
-    repo_path = Path(repo_path).resolve()
+    else:
+        repo_path = Path(repo_path).resolve()
     
     if not repo_path.exists():
         return False, f"Repository nicht gefunden: {repo_path}"

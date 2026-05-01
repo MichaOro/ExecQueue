@@ -118,9 +118,9 @@ class TestCreateCommand:
         assert "nicht leer" in update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_create_prompt_sets_prompt_and_returns_branch_select(self):
-        """Test that create_prompt stores the prompt and returns BRANCH_SELECT state."""
-        from execqueue.workers.telegram.commands import BRANCH_SELECT
+    async def test_create_prompt_sets_prompt_and_uses_current_branch(self):
+        """Test that create_prompt stores the prompt and uses the active branch."""
+        from execqueue.workers.telegram.commands import CONFIRMATION
 
         update = MagicMock()
         update.message = MagicMock()
@@ -129,15 +129,11 @@ class TestCreateCommand:
         context = MagicMock()
         context.user_data = {"type": "planning", "created_by_ref": "123"}
 
-        with patch("execqueue.workers.telegram.commands._show_existing_branches_direct", return_value=BRANCH_SELECT):
+        with patch("execqueue.workers.telegram.commands._assign_current_branch_and_confirm", return_value=CONFIRMATION):
             result = await create_prompt(update, context)
 
-        # Should return BRANCH_SELECT state, not call create_task directly
-        assert result == BRANCH_SELECT
-        # Prompt should be stored in user_data
+        assert result == CONFIRMATION
         assert context.user_data["prompt"] == "Test prompt"
-        # create_task should NOT be called at this stage
-        # (it will be called later in create_confirmation or confirm_callback)
 
     @pytest.mark.asyncio
     async def test_create_cancel_clears_state(self):
@@ -340,10 +336,10 @@ class TestBranchChoiceHandler:
         context = MagicMock()
         context.user_data = {"type": "planning"}
         
-        with patch("execqueue.workers.telegram.commands._show_existing_branches_direct", return_value=BRANCH_SELECT):
+        with patch("execqueue.workers.telegram.commands._assign_current_branch_and_confirm", return_value=CONFIRMATION):
             result = await create_branch_choice(update, context)
         
-        assert result == BRANCH_SELECT
+        assert result == CONFIRMATION
 
 
 class TestBranchSelectHandler:
@@ -393,6 +389,22 @@ class TestBranchSelectHandler:
         result = await create_branch_select(update, context)
         
         assert result == BRANCH_CHOICE
+
+    @pytest.mark.asyncio
+    async def test_create_branch_select_zero_uses_current_branch(self):
+        """Test selecting the active branch fallback."""
+        update = MagicMock()
+        update.message = MagicMock()
+        update.message.text = "0"
+        update.message.reply_text = AsyncMock()
+        context = MagicMock()
+        context.user_data = {}
+
+        with patch("execqueue.workers.telegram.commands.get_current_branch", return_value="develop"):
+            result = await create_branch_select(update, context)
+
+        assert result == CONFIRMATION
+        assert context.user_data["branch"] == "develop"
 
 
 class TestBranchNameHandler:

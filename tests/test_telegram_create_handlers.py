@@ -150,6 +150,19 @@ class TestCreateBranchSelect:
         assert result == BRANCH_CHOICE
 
     @pytest.mark.asyncio
+    async def test_zero_uses_current_active_branch(self):
+        """Test that selecting 0 uses the current active branch."""
+        update = MockUpdate("0")
+        context = MagicMock()
+        context.user_data = {}
+
+        with patch("execqueue.workers.telegram.commands.get_current_branch", return_value="develop"):
+            result = await create_branch_select(update, context)
+
+            assert result == CONFIRMATION
+            assert context.user_data["branch"] == "develop"
+
+    @pytest.mark.asyncio
     async def test_non_numeric_input_prompts_again(self):
         """Test that non-numeric input prompts for retry."""
         update = MockUpdate("invalid")
@@ -576,21 +589,20 @@ class TestTypeSpecificBranchLogic:
     """Tests for type-specific branch logic."""
 
     @pytest.mark.asyncio
-    async def test_planning_flow_no_branch_choice(self):
-        """Test that planning type skips branch choice step."""
-        from execqueue.workers.telegram.commands import TYPE_PLANNING, BRANCH_SELECT
+    async def test_planning_flow_uses_current_branch(self):
+        """Test that planning type uses the current branch directly."""
+        from execqueue.workers.telegram.commands import TYPE_PLANNING, CONFIRMATION
         
         update = MagicMock()
         update.message = MockMessage("Test prompt")
         context = MagicMock()
         context.user_data = {"type": TYPE_PLANNING}
         
-        with patch("execqueue.workers.telegram.commands._show_existing_branches_direct") as mock_show:
-            mock_show.return_value = BRANCH_SELECT
+        with patch("execqueue.workers.telegram.commands._assign_current_branch_and_confirm") as mock_show:
+            mock_show.return_value = CONFIRMATION
             result = await create_prompt(update, context)
             
-            # Should go directly to BRANCH_SELECT, not BRANCH_CHOICE
-            assert result == BRANCH_SELECT
+            assert result == CONFIRMATION
             mock_show.assert_called_once()
 
     @pytest.mark.asyncio

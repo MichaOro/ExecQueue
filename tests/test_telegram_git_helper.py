@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from execqueue.workers.telegram.git_helper import (
+    get_current_branch,
     get_local_branches,
     validate_branch_name,
     branch_exists,
@@ -218,6 +219,36 @@ class TestBranchExists:
             assert result is True
             call_args = mock_run.call_args
             assert call_args.kwargs["cwd"] == Path.cwd()
+
+
+class TestGetCurrentBranch:
+    """Tests for get_current_branch function."""
+
+    def test_returns_current_branch_name(self, tmp_path):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="main\n",
+                stderr="",
+            )
+            result = get_current_branch(tmp_path)
+            assert result == "main"
+
+    def test_raises_on_detached_head(self, tmp_path):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="HEAD\n",
+                stderr="",
+            )
+            with pytest.raises(GitRepositoryError):
+                get_current_branch(tmp_path)
+
+    def test_raises_timeout_error_on_timeout(self, tmp_path):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=5)
+            with pytest.raises(GitTimeoutError):
+                get_current_branch(tmp_path, timeout=5)
 
 
 class TestGitHelperExceptions:

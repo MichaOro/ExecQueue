@@ -12,6 +12,7 @@ from execqueue.settings import get_settings
 from execqueue.workers.telegram.api_client import api_client
 from execqueue.workers.telegram.auth import get_user_info
 from execqueue.workers.telegram.git_helper import (
+    get_current_branch,
     get_local_branches,
     validate_branch_name,
     GitTimeoutError,
@@ -116,6 +117,14 @@ def _get_branch_validation_detail(branch_name: str) -> str:
         return "Zwei Punkte (..) sind nicht erlaubt."
     
     return "Der Name enthaelt ungültige Zeichen oder Muster."
+
+
+def _try_get_current_branch() -> str | None:
+    """Return the active branch when available, otherwise None."""
+    try:
+        return get_current_branch()
+    except (GitTimeoutError, GitRepositoryError):
+        return None
 
 
 def get_command_list() -> list[dict[str, str]]:
@@ -367,9 +376,46 @@ async def create_prompt(
     if task_type == TYPE_REQUIREMENT:
         # Requirements can choose existing or new branch
         return await _show_branch_choice_text(update, context)
+
+    # Planning, Execution, and Analysis use the active branch by default.
+    return await _assign_current_branch_and_confirm(update, context)
+
+
+async def _assign_current_branch_and_confirm(
+    update: "Update | None", context: "CallbackContext | None"
+) -> int:
+    """Use the currently active branch as default and continue to confirmation."""
+    if not update or context is None:
+        return _conversation_end()
+
+    try:
+        active_branch = get_current_branch()
+    except GitTimeoutError:
+        message = (
+            "\u23F0 *Zeitueberschreitung*\n\n"
+            "Aktueller Branch konnte nicht rechtzeitig gelesen werden. Bitte spaeter erneut versuchen."
+        )
+    except GitRepositoryError as e:
+        logger.error("Git repository error while reading current branch: %s", e)
+        message = (
+            "\u274C *Repository-Fehler*\n\n"
+            f"{str(e)}\n\n"
+            "Abbrechen mit /cancel"
+        )
+    except Exception:
+        logger.exception("Unexpected error while reading current branch")
+        message = (
+            "\u274C *Unerwarteter Fehler*\n\n"
+            "Der aktuelle Branch konnte nicht bestimmt werden. Bitte Logs pruefen."
+        )
     else:
-        # Planning, Execution, Analysis: Only existing branches
-        return await _show_existing_branches_direct(update, context)
+        context.user_data["branch"] = active_branch
+        return await _send_confirmation_summary(update, context)
+
+    message_obj = getattr(update, "message", None)
+    if message_obj is not None:
+        await message_obj.reply_text(message, parse_mode="Markdown")
+    return _conversation_end()
 
 
 async def _show_branch_choice_text(
@@ -392,11 +438,7 @@ async def _show_branch_choice_text(
 async def _show_existing_branches_direct(
     update: "Update | None", context: "CallbackContext | None"
 ) -> int:
-    """Show existing branches directly (for non-requirement types).
-    
-    This is a simplified version that skips the branch choice step.
-    Used for Planning, Execution, and Analysis types.
-    """
+    """Show existing branches directly."""
     if not update or not update.message:
         return _conversation_end()
     
@@ -416,9 +458,16 @@ async def _show_existing_branches_direct(
         if len(branches) > 10:
             branch_list += f"\n... und {len(branches) - 10} weitere"
         
+        current_branch = _try_get_current_branch()
+        default_line = (
+            f"0 - Aktuellen Branch verwenden ({current_branch})\n"
+            if current_branch
+            else ""
+        )
         await update.message.reply_text(
             f"\U0001F33F *W\u00E4hle einen bestehenden Branch* ({len(branches)} verf\u00FCgbar)\n\n"
             f"{branch_list}\n\n"
+            f"{default_line}"
             "Nummer eingeben:",
             parse_mode="Markdown"
         )
@@ -471,8 +520,7 @@ async def create_branch_choice(
     task_type = context.user_data.get("type")
     if task_type != TYPE_REQUIREMENT:
         logger.warning("Branch choice called for non-requirement type: %s", task_type)
-        # Bypass to branch selection
-        return await _show_existing_branches_direct(update, context)
+        return await _assign_current_branch_and_confirm(update, context)
 
     text = update.message.text.strip()
     
@@ -492,9 +540,16 @@ async def create_branch_choice(
             if len(branches) > 10:
                 branch_list += f"\n... und {len(branches) - 10} weitere"
             
+            current_branch = _try_get_current_branch()
+            default_line = (
+                f"0 - Aktuellen Branch verwenden ({current_branch})\n"
+                if current_branch
+                else ""
+            )
             await update.message.reply_text(
                 f"\ud83d\udc47 W\u00E4hle einen bestehenden Branch:\n\n{branch_list}\n\n"
-                "Nummer eingeben oder 'x' zum Abbrechen:",
+                f"{default_line}"
+                "Nummer eingeben oder 'x' zum Zurueckgehen:",
                 parse_mode="Markdown"
             )
             return BRANCH_SELECT
@@ -555,6 +610,24 @@ async def create_branch_select(
     
     if text.lower() == "x":
         return BRANCH_CHOICE
+
+    if text == "0":
+        try:
+            context.user_data["branch"] = get_current_branch()
+            return await _send_confirmation_summary(update, context)
+        except GitTimeoutError:
+            await update.message.reply_text(
+                "\u23F0 *Zeitueberschreitung*\n\n"
+                "Aktueller Branch konnte nicht rechtzeitig gelesen werden.",
+                parse_mode="Markdown"
+            )
+            return BRANCH_SELECT
+        except GitRepositoryError as e:
+            await update.message.reply_text(
+                f"\u274C *Repository-Fehler*\n\n{str(e)}",
+                parse_mode="Markdown"
+            )
+            return BRANCH_SELECT
     
     try:
         index = int(text) - 1
