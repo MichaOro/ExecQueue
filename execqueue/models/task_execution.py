@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
@@ -21,6 +21,7 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    Uuid,
     func,
     text,
 )
@@ -87,6 +88,7 @@ class TaskExecution(Base):
         Index("ix_task_executions_correlation_id", "correlation_id"),
         Index("ix_task_executions_opencode_session_id", "opencode_session_id"),
         Index("ix_task_executions_updated_at", "updated_at"),
+        Index("ix_task_executions_workflow_id", "workflow_id"),
         # Indexe für Stale-Erkennung (Paket 09)
         Index("ix_task_executions_heartbeat_at_status", "heartbeat_at", "status"),
         Index("ix_task_executions_updated_at_status", "updated_at", "status"),
@@ -100,10 +102,14 @@ class TaskExecution(Base):
         ),
     )
 
-    id: Mapped[UUID] = mapped_column(primary_key=True)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     task_id: Mapped[UUID] = mapped_column(
         ForeignKey("task.id"),
         nullable=False,
+    )
+    workflow_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workflow.id"),
+        nullable=True,
     )
     runner_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -84,7 +84,7 @@ def mock_opencode_client():
         session.id = f"session-{name}-xyz"
         return session
 
-    client.create_session = mock_create_session
+    client.create_session = AsyncMock(side_effect=mock_create_session)
     client.close_session = AsyncMock()
 
     return client
@@ -158,7 +158,7 @@ class TestFullWorkflowIntegration:
             execution = TaskExecution(
                 task_id=task.task_id,
                 workflow_id=ctx.workflow_id,
-                status="pending",
+                status="prepared",
             )
             db_session.add(execution)
         db_session.commit()
@@ -244,7 +244,7 @@ class TestFullWorkflowIntegration:
             execution = TaskExecution(
                 task_id=task.task_id,
                 workflow_id=ctx.workflow_id,
-                status="pending",
+                status="prepared",
             )
             db_session.add(execution)
         db_session.commit()
@@ -350,7 +350,7 @@ class TestFullWorkflowIntegration:
             execution = TaskExecution(
                 task_id=task.task_id,
                 workflow_id=ctx.workflow_id,
-                status="pending",
+                status="prepared",
             )
             db_session.add(execution)
         db_session.commit()

@@ -6,7 +6,7 @@ Builds and validates WorkflowContext from TaskGroup.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -16,6 +16,11 @@ from execqueue.orchestrator.workflow_models import (
     PreparedExecutionContext,
     WorkflowContext,
 )
+
+
+def utcnow() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -226,5 +231,5 @@ class WorkflowContextBuilder:
             requirement_id=group.requirement_id,
             tasks=tasks,
             dependencies=dependencies,
-            created_at=datetime.utcnow(),
+            created_at=utcnow(),
         )

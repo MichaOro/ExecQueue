@@ -46,9 +46,13 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name="pk_workflow"),
     )
+    op.create_index(op.f("ix_workflow_epic_id"), "workflow", ["epic_id"], unique=False)
+    op.create_index(op.f("ix_workflow_requirement_id"), "workflow", ["requirement_id"], unique=False)
     op.create_index(op.f("ix_workflow_status"), "workflow", ["status"], unique=False)
 
 
 def downgrade() -> None:
+    op.drop_index(op.f("ix_workflow_requirement_id"), table_name="workflow")
+    op.drop_index(op.f("ix_workflow_epic_id"), table_name="workflow")
     op.drop_index(op.f("ix_workflow_status"), table_name="workflow")
     op.drop_table("workflow")

@@ -11,7 +11,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -34,12 +34,18 @@ from execqueue.orchestrator.models import (
 )
 from execqueue.orchestrator.grouping import TaskGroup, TaskGroupingEngine
 from execqueue.orchestrator.context_builder import WorkflowContextBuilder
+from execqueue.orchestrator.idempotency_service import IdempotencyContext
 from execqueue.orchestrator.workflow_repo import WorkflowRepository
 from execqueue.orchestrator.runner_manager import RunnerManager, RunnerHandle
 from execqueue.orchestrator.workflow_models import WorkflowStatus
 from execqueue.runner.config import RunnerConfig
 
 logger = logging.getLogger(__name__)
+
+
+def utcnow() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -205,32 +211,50 @@ class Orchestrator:
                 group.group_type,
                 len(group.tasks),
             )
+            workflow_group = TaskGroup(
+                group_id=workflow.id,
+                tasks=group.tasks,
+                group_type=group.group_type,
+                epic_id=group.epic_id,
+                requirement_id=group.requirement_id,
+            )
             
             # Step 4: Prepare contexts for each task in the group
+            prepared_contexts: list[PreparedExecutionContext] = []
             for task in group.tasks:
                 result = self._prepare_task_context(
-                    session, task, str(workflow.id),
+                    session, task, workflow.id,
                 )
                 result.workflow_id = workflow.id
                 results.append(result)
-            
-            # Step 5: Start runner for workflow (async, non-blocking)
-            try:
-                handle = asyncio.run(
-                    self.runner_manager.start_runner_for_context(wf_ctx)
-                )
-                
-                # Step 6: Store runner_uuid in workflow
-                self.workflow_repo.set_runner_uuid(
-                    session, workflow.id, handle.runner_uuid
-                )
-                logger.info(
-                    "Started runner %s for workflow %s",
-                    handle.runner_uuid,
-                    workflow.id,
-                )
-            except Exception as e:
-                logger.warning("Failed to start runner: %s", e)
+                if result.context is not None:
+                    prepared_contexts.append(result.context)
+
+            # Step 5: Start runner only when there is actual work left.
+            if prepared_contexts:
+                try:
+                    runner_ctx = self.workflow_builder.build_context(
+                        workflow_group,
+                        prepared_tasks=prepared_contexts,
+                    )
+                    handle = asyncio.run(
+                        self.runner_manager.start_runner_for_context(runner_ctx)
+                    )
+
+                    # Step 6: Store runner_uuid in workflow
+                    self.workflow_repo.set_runner_uuid(
+                        session, workflow.id, handle.runner_uuid
+                    )
+                    logger.info(
+                        "Started runner %s for workflow %s",
+                        handle.runner_uuid,
+                        workflow.id,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to start runner: %s", e)
+            else:
+                self.workflow_repo.update_status(session, workflow.id, WorkflowStatus.DONE)
+                logger.info("Workflow %s completed via idempotent reuse", workflow.id)
             
         except Exception as e:
             logger.error("Failed to process workflow group: %s", e, exc_info=True)
@@ -288,11 +312,7 @@ class Orchestrator:
                         )
                         continue
                 
-                # Load tasks for this workflow
-                # Note: We use batch_id as the workflow ID reference
-                tasks = session.query(Task).filter(
-                    Task.batch_id == str(wf.id)
-                ).all()
+                tasks = session.query(Task).filter(Task.workflow_id == wf.id).all()
                 
                 if not tasks:
                     # No tasks found, mark workflow as done
@@ -305,10 +325,11 @@ class Orchestrator:
                     )
                     continue
                 
-                # Filter out done tasks
+                # Filter out completed tasks
+                completed_statuses = {TaskStatus.COMPLETED.value, "done"}
                 pending_tasks = [
                     t for t in tasks
-                    if t.status != TaskStatus.DONE.value
+                    if t.status not in completed_statuses
                 ]
                 
                 if not pending_tasks:
@@ -351,14 +372,14 @@ class Orchestrator:
         self,
         session: Session,
         task: Task,
-        batch_id: str,
+        workflow_id: UUID,
     ) -> PreparationResult:
         """Prepare context for a single task.
         
         Args:
             session: Database session
             task: Locked task
-            batch_id: Batch ID
+            workflow_id: Workflow identifier
             
         Returns:
             PreparationResult
@@ -371,6 +392,39 @@ class Orchestrator:
                 task_type=task.type,
                 details=task.details,
             )
+
+            task.workflow_id = workflow_id
+            task.batch_id = str(workflow_id)
+
+            idempotency_ctx = IdempotencyContext(
+                workflow_id=str(workflow_id),
+                task_id=task.id,
+                task_type=task.type,
+                prompt=task.prompt,
+                details=task.details or {},
+                idempotency_key=task.idempotency_key,
+            )
+            existing_execution = self.workflow_repo.idempotency_service.is_task_already_done(
+                session,
+                idempotency_ctx,
+            )
+            if existing_execution is not None:
+                task.status = TaskStatus.COMPLETED.value
+                task.updated_at = utcnow()
+                session.commit()
+                logger.info(
+                    "Task %s reused existing execution %s via idempotency",
+                    task.task_number,
+                    existing_execution.id,
+                )
+                return PreparationResult(
+                    task_id=task.id,
+                    task_number=task.task_number,
+                    success=True,
+                    context=None,
+                    queued_at=task.queued_at,
+                    workflow_id=workflow_id,
+                )
             
             # Prepare Git context if needed
             branch_name: str | None = None
@@ -401,7 +455,7 @@ class Orchestrator:
                 branch_name=branch_name,
                 worktree_path=worktree_path,
                 commit_sha_before=commit_sha_before,
-                batch_id=batch_id,
+                batch_id=str(workflow_id),
                 correlation_id=f"prep-{task.id.hex[:8]}",
                 details=task.details,
             )
@@ -419,7 +473,7 @@ class Orchestrator:
             # Update task status to prepared
             task.status = TaskStatus.PREPARED.value
             task.prepared_context_version = context.version
-            task.updated_at = datetime.utcnow()
+            task.updated_at = utcnow()
             
             session.commit()
             
@@ -435,13 +489,14 @@ class Orchestrator:
                 success=True,
                 context=context,
                 queued_at=task.queued_at,
+                workflow_id=workflow_id,
             )
         
         except PreparationError as e:
             # Handle preparation error
             task.preparation_attempt_count = (task.preparation_attempt_count or 0) + 1
             task.last_preparation_error = e.message
-            task.updated_at = datetime.utcnow()
+            task.updated_at = utcnow()
             
             # Determine target status based on error type
             if e.is_non_recoverable():
@@ -464,13 +519,14 @@ class Orchestrator:
                 task_number=task.task_number,
                 success=False,
                 error=e,
+                workflow_id=workflow_id,
             )
         
         except Exception as e:
             # Unexpected error
             task.preparation_attempt_count = (task.preparation_attempt_count or 0) + 1
             task.last_preparation_error = str(e)
-            task.updated_at = datetime.utcnow()
+            task.updated_at = utcnow()
             session.commit()
             
             logger.error(
@@ -489,4 +545,5 @@ class Orchestrator:
                     message=f"Unexpected error: {e}",
                     task_id=task.id,
                 ),
+                workflow_id=workflow_id,
             )

@@ -6,14 +6,19 @@ Implements REQ-015 WP01: Workflow Data Model & Migration
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, String, Uuid, func
+from sqlalchemy import CheckConstraint, DateTime, Index, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from execqueue.db.base import Base
+
+
+def utcnow() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(timezone.utc)
 
 
 class WorkflowStatus(str, Enum):
@@ -46,7 +51,7 @@ class WorkflowContext:
     requirement_id: UUID | None
     tasks: list[PreparedExecutionContext] = field(default_factory=list)
     dependencies: dict[UUID, list[UUID]] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=utcnow)
 
 
 class Workflow(Base):
@@ -61,6 +66,9 @@ class Workflow(Base):
             "status IN ('running', 'done', 'failed')",
             name="ck_workflow_status_allowed",
         ),
+        Index("ix_workflow_status", "status"),
+        Index("ix_workflow_epic_id", "epic_id"),
+        Index("ix_workflow_requirement_id", "requirement_id"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)

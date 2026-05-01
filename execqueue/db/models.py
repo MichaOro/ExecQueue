@@ -63,21 +63,21 @@ class RequirementStatus(str, Enum):
 
 
 class TaskStatus(str, Enum):
-    """Task lifecycle states for REQ-011 orchestrator execution preparation."""
+    """Task lifecycle states for REQ-011 orchestrator execution preparation.
+    
+    States are grouped into three categories:
+    - Preparation states: BACKLOG, QUEUED, PREPARED
+    - Execution states: IN_PROGRESS, COMPLETED
+    - Terminal states: FAILED, COMPLETED
+    """
 
     BACKLOG = "backlog"
     QUEUED = "queued"
     PREPARED = "prepared"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
     FAILED = "failed"
-
-
-class TaskExecutionStatus(str, Enum):
-    """Execution state for task runtime tracking."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
+    DONE = "completed"
 
 
 class Project(Base):
@@ -309,6 +309,12 @@ class Task(Base):
     batch_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
+        comment="Deprecated: Use workflow_id instead. Kept for backward compatibility.",
+    )
+    workflow_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        nullable=True,
+        index=True,
     )
     allow_parallel_execution: Mapped[bool] = mapped_column(
         Boolean,
@@ -329,111 +335,5 @@ class Task(Base):
     )
 
 
-class TaskExecution(Base):
-    """Runtime execution record for task instances.
-
-    Tracks the execution state of individual task instances across
-    workflow runs. Used for crash recovery and result persistence.
-    """
-
-    __tablename__ = "task_execution"
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('pending', 'running', 'done', 'failed')",
-            name="ck_task_execution_status_allowed",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
-    task_id: Mapped[UUID] = mapped_column(
-        Uuid,
-        nullable=False,
-        index=True,
-    )
-    workflow_id: Mapped[UUID] = mapped_column(
-        Uuid,
-        nullable=False,
-        index=True,
-    )
-    status: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default=TaskExecutionStatus.PENDING.value,
-        server_default=TaskExecutionStatus.PENDING.value,
-    )
-    worktree_path: Mapped[str | None] = mapped_column(
-        String(1024),
-        nullable=True,
-    )
-    commit_sha_before: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-    )
-    commit_sha_after: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-    )
-    opencode_session_id: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-    error_message: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-    result_summary: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON,
-        nullable=True,
-        default=None,
-    )
-    started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-
-class TaskExecutionEvent(Base):
-    """Event log for task execution lifecycle.
-
-    Records state transitions and important events during
-    task execution for audit and debugging purposes.
-    """
-
-    __tablename__ = "task_execution_event"
-
-    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
-    task_execution_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("task_execution.id"),
-        nullable=False,
-        index=True,
-    )
-    event_type: Mapped[str] = mapped_column(
-        String(64),
-        nullable=False,
-    )
-    data: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON,
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
+from execqueue.models.task_execution import TaskExecution
+from execqueue.models.task_execution_event import TaskExecutionEvent

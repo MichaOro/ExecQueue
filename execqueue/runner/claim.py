@@ -137,9 +137,12 @@ def claim_task(session: Session, task_id: UUID, runner_id: str) -> TaskExecution
         phase="claim",
     )
 
+    task = session.get(Task, task_id)
+
     # Create the TaskExecution record with correlation ID
     execution = TaskExecution(
         task_id=task_id,
+        workflow_id=task.workflow_id if task else None,
         runner_id=runner_id,
         correlation_id=correlation_id,  # REQ-012-10: Correlation ID propagation
         status="queued",
