@@ -332,6 +332,11 @@ class Orchestrator:
             # Get all running workflows
             running = self.workflow_repo.get_running_workflows(session)
             logger.info("Found %d running workflows to recover", len(running))
+        except Exception as e:
+            # Log error but continue - workflow recovery is not critical for startup
+            logger.warning("Workflow recovery failed: %s", e)
+            # Return early - no workflows to recover
+            return
             
             for wf in running:
                 # Check if runner already exists

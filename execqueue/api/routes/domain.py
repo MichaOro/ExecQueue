@@ -126,6 +126,16 @@ def _raise_idempotency_conflict(idempotency_key: str) -> NoReturn:
     )
 
 
+async def _run_orchestrator_background() -> None:
+    """Background helper to trigger orchestrator preparation cycle."""
+    session = create_session()
+    try:
+        orchestrator = Orchestrator()
+        orchestrator.run_preparation_cycle(session)
+    finally:
+        session.close()
+
+
 @router.post(
     "/task",
     summary="Create a task",
@@ -139,17 +149,6 @@ def _raise_idempotency_conflict(idempotency_key: str) -> NoReturn:
         422: {"description": "Invalid task payload"},
     },
 )
-
-
-async def _run_orchestrator_background() -> None:
-    """Background helper to trigger orchestrator preparation cycle."""
-    session = create_session()
-    try:
-        orchestrator = Orchestrator()
-        orchestrator.run_preparation_cycle(session)
-    finally:
-        session.close()
-
 async def create_task_endpoint(
     payload: TaskCreateRequest,
     session: DatabaseSession,
