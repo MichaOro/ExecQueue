@@ -79,7 +79,11 @@ class ErrorType(str, Enum):
 
 
 class RunnerPhase(str, Enum):
-    """Runner execution phases for retry matrix."""
+    """Runner execution phases for retry matrix.
+    
+    NOTE: This duplicates execqueue.observability.logging.RunnerPhase
+    to avoid circular imports. Changes must be synchronized manually.
+    """
 
     CLAIM = "claim"
     SESSION = "session"
@@ -338,12 +342,12 @@ def calculate_retry_decision(
         policy.max_delay_seconds,
     )
 
-    # Add jitter (0-10% of delay)
+    # Symmetrischer Jitter für Thundering-Herd-Vermeidung
+    # Bereich: [-jitter_factor, +jitter_factor] × delay
     import random
 
     jitter = delay * policy.jitter_factor * (2 * random.random() - 1)
-    delay += jitter
-    delay = max(0, delay)  # Ensure non-negative
+    delay = max(0.0, delay + jitter)
 
     next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
 
@@ -426,7 +430,11 @@ def is_execution_stale(
             return True
 
     # Check update timeout
-    update_age = (now - execution.updated_at).total_seconds()
+    if execution.updated_at is None:
+        # Fall back to started_at or skip check
+        update_age = 0.0
+    else:
+        update_age = (now - execution.updated_at).total_seconds()
     if update_age > thresholds.update_timeout_seconds:
         logger.info(
             f"Execution {execution.id} stale: update timeout "

@@ -425,14 +425,8 @@ async def _show_branch_choice_text(
     if not update or not update.message:
         return _conversation_end()
     
-    await update.message.reply_text(
-        "\U0001F33F *Branch-Auswahl*\n\n"
-        "Wie moechtest du den Branch w\u00E4hlen?\n\n"
-        "1 - Bestehenden Branch w\u00E4hlen\n"
-        "2 - Neuen Branch erstellen",
-        parse_mode="Markdown"
-    )
-    return BRANCH_CHOICE
+    # This now calls the keyboard function to provide a better user experience
+    return await _show_branch_choice_keyboard(update, context)
 
 
 async def _show_existing_branches_direct(
@@ -967,7 +961,7 @@ async def _show_existing_branches_keyboard(
     update: "Update | None", context: "CallbackContext | None"
 ) -> int:
     """Show existing branches as inline keyboard."""
-    if not update or not update.callback_query and not update.message:
+    if not update or (not update.callback_query and not update.message):
         return _conversation_end()
 
     try:
@@ -1081,7 +1075,7 @@ async def _show_branch_choice_keyboard(
     update: "Update | None", context: "CallbackContext | None"
 ) -> int:
     """Show branch option selection keyboard (for Requirements only)."""
-    if not update or not update.callback_query and not update.message:
+    if not update or (not update.callback_query and not update.message):
         return _conversation_end()
 
     keyboard = [

@@ -25,6 +25,14 @@ from execqueue.observability.logging import (
     record_retry_exhausted,
     record_stale_detection,
     record_adoption_conflict,
+    record_worktree_created,
+    record_worktree_cleaned,
+    record_worktree_error,
+    record_cherry_pick_attempt,
+    record_cherry_pick_success,
+    record_validation_passed,
+    record_validation_failed,
+    record_validation_review,
     record_phase_duration,
 )
 
@@ -49,5 +57,13 @@ __all__ = [
     "record_retry_exhausted",
     "record_stale_detection",
     "record_adoption_conflict",
+    "record_worktree_created",
+    "record_worktree_cleaned",
+    "record_worktree_error",
+    "record_cherry_pick_attempt",
+    "record_cherry_pick_success",
+    "record_validation_passed",
+    "record_validation_failed",
+    "record_validation_review",
     "record_phase_duration",
 ]

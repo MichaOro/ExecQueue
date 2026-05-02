@@ -22,6 +22,10 @@ from execqueue.db.models import Task, TaskStatus
 from execqueue.orchestrator.candidate_discovery import CandidateDiscovery
 from execqueue.orchestrator.classification import TaskClassifier, BatchPlanner
 from execqueue.orchestrator.context_contract import PreparedContextBuilder
+from execqueue.orchestrator.distributed_lock import (
+    DistributedLockManager,
+    ORCHESTRATOR_LOCK_KEY,
+)
 from execqueue.orchestrator.git_context import GitContextPreparer
 from execqueue.orchestrator.locking import TaskLocker
 from execqueue.orchestrator.models import (
@@ -39,6 +43,7 @@ from execqueue.orchestrator.workflow_repo import WorkflowRepository
 from execqueue.orchestrator.runner_manager import RunnerManager, RunnerHandle
 from execqueue.orchestrator.workflow_models import WorkflowStatus
 from execqueue.runner.config import RunnerConfig
+from execqueue.runner.workflow_runner import WorkflowRunner
 
 logger = logging.getLogger(__name__)
 
@@ -118,12 +123,19 @@ class Orchestrator:
         self.workflow_builder = WorkflowContextBuilder()
         self.workflow_repo = WorkflowRepository()
         self.runner_manager = RunnerManager()
+        
+        # Distributed locking for coordinator access
+        self.lock_manager = DistributedLockManager(worker_id=self.worker_id)
     
     def run_preparation_cycle(self, session: Session) -> list[PreparationResult]:
         """Run a full preparation cycle with workflow support.
         
         This is the main entry point for the orchestrator. It discovers
         candidates, groups them into workflows, and prepares contexts.
+        
+        The candidate discovery and grouping steps are protected by a
+        distributed lock to prevent race conditions when multiple workers
+        are running simultaneously.
         
         Args:
             session: Database session
@@ -136,19 +148,29 @@ class Orchestrator:
         results: list[PreparationResult] = []
         
         try:
-            # Step 1: Discover candidates
-            candidates = self.candidate_discovery.find_candidates(session)
-            if not candidates:
-                logger.info("No executable backlog candidates found")
-                return results
+            # Acquire distributed lock for candidate discovery and grouping
+            # This prevents race conditions when multiple workers run simultaneously
+            with self.lock_manager.acquire_lock(session, ORCHESTRATOR_LOCK_KEY) as lock_acquired:
+                if not lock_acquired:
+                    logger.warning(
+                        "Could not acquire orchestrator lock, skipping preparation cycle",
+                    )
+                    return results
+                
+                # Step 1: Discover candidates (under lock)
+                candidates = self.candidate_discovery.find_candidates(session)
+                if not candidates:
+                    logger.info("No executable backlog candidates found")
+                    return results
+                
+                logger.info("Found %d candidates", len(candidates))
+                
+                # Step 2: Group tasks into workflows (REQ-015) (under lock)
+                groups = self.grouping_engine.create_groups(session, candidates)
+                logger.info("Created %d task groups", len(groups))
             
-            logger.info("Found %d candidates", len(candidates))
-            
-            # Step 2: Group tasks into workflows (REQ-015)
-            groups = self.grouping_engine.create_groups(session, candidates)
-            logger.info("Created %d task groups", len(groups))
-            
-            # Step 3: Process each group as a workflow
+            # Step 3: Process each group as a workflow (outside lock)
+            # Processing happens outside the lock to allow parallel execution
             for group in groups:
                 result = self._process_workflow_group(session, group)
                 results.extend(result)
@@ -237,8 +259,13 @@ class Orchestrator:
                         workflow_group,
                         prepared_tasks=prepared_contexts,
                     )
+                    
+                    # Start WorkflowRunner with actual implementation
                     handle = asyncio.run(
-                        self.runner_manager.start_runner_for_context(runner_ctx)
+                        self.runner_manager.start_runner_for_context(
+                            runner_ctx,
+                            runner_class=WorkflowRunner,
+                        )
                     )
 
                     # Step 6: Store runner_uuid in workflow
@@ -246,9 +273,10 @@ class Orchestrator:
                         session, workflow.id, handle.runner_uuid
                     )
                     logger.info(
-                        "Started runner %s for workflow %s",
+                        "Started WorkflowRunner %s for workflow %s (tasks=%d)",
                         handle.runner_uuid,
                         workflow.id,
+                        len(prepared_contexts),
                     )
                 except Exception as e:
                     logger.warning("Failed to start runner: %s", e)
@@ -258,6 +286,18 @@ class Orchestrator:
             
         except Exception as e:
             logger.error("Failed to process workflow group: %s", e, exc_info=True)
+            # Workflow als FAILED markieren
+            try:
+                with self._get_session() as session:
+                    self.workflow_repo.update_status(
+                        session,
+                        group.group_id,
+                        WorkflowStatus.FAILED,
+                        error_message=str(e),
+                    )
+            except Exception as persist_err:
+                logger.error("Failed to persist workflow failure: %s", persist_err)
+            
             # Create failed results for all tasks in group
             for task in group.tasks:
                 results.append(PreparationResult(
@@ -326,7 +366,7 @@ class Orchestrator:
                     continue
                 
                 # Filter out completed tasks
-                completed_statuses = {TaskStatus.COMPLETED.value, "done"}
+                completed_statuses = {TaskStatus.COMPLETED.value}
                 pending_tasks = [
                     t for t in tasks
                     if t.status not in completed_statuses
@@ -354,13 +394,16 @@ class Orchestrator:
                 
                 wf_ctx = self.workflow_builder.build_context(group)
                 
-                # Start new runner
-                handle = await self.runner_manager.start_runner_for_context(wf_ctx)
+                # Start new WorkflowRunner
+                handle = await self.runner_manager.start_runner_for_context(
+                    wf_ctx,
+                    runner_class=WorkflowRunner,
+                )
                 self.workflow_repo.set_runner_uuid(
                     session, wf.id, handle.runner_uuid
                 )
                 logger.info(
-                    "Restarted runner %s for recovered workflow %s",
+                    "Restarted WorkflowRunner %s for recovered workflow %s",
                     handle.runner_uuid,
                     wf.id,
                 )
@@ -403,6 +446,9 @@ class Orchestrator:
                 prompt=task.prompt,
                 details=task.details or {},
                 idempotency_key=task.idempotency_key,
+                model_version=task.details.get("model_version") if task.details else None,
+                temperature=task.details.get("temperature") if task.details else None,
+                max_tokens=task.details.get("max_tokens") if task.details else None,
             )
             existing_execution = self.workflow_repo.idempotency_service.is_task_already_done(
                 session,
@@ -412,6 +458,8 @@ class Orchestrator:
                 task.status = TaskStatus.COMPLETED.value
                 task.updated_at = utcnow()
                 session.commit()
+                # Trigger workflow status aggregation after idempotent reuse
+                self.workflow_repo.check_and_update_workflow_status(session, workflow_id)
                 logger.info(
                     "Task %s reused existing execution %s via idempotency",
                     task.task_number,

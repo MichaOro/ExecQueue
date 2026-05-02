@@ -615,7 +615,7 @@ class TestTypeSpecificBranchLogic:
         context = MagicMock()
         context.user_data = {"type": TYPE_REQUIREMENT}
         
-        with patch("execqueue.workers.telegram.commands._show_branch_choice_text") as mock_show:
+        with patch("execqueue.workers.telegram.commands._show_branch_choice_keyboard") as mock_show:
             mock_show.return_value = BRANCH_CHOICE
             result = await create_prompt(update, context)
             
@@ -650,6 +650,7 @@ from execqueue.workers.telegram.commands import (
     confirm_no,
     _show_existing_branches_direct,
     _show_branch_choice_text,
+    _show_branch_choice_keyboard,
     TYPE_PLANNING,
     TYPE_REQUIREMENT,
 )

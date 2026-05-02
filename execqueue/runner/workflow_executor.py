@@ -16,6 +16,16 @@ if TYPE_CHECKING:
     from execqueue.runner.session_strategy import HybridSessionStrategy, SessionPlan
     from execqueue.runner.git_workflow import GitWorkflowManager
     from execqueue.orchestrator.workflow_models import WorkflowContext
+    from sqlalchemy.orm import Session
+
+# Importe für die ExecutionChain-Integration
+from execqueue.models.task_execution import TaskExecution
+from execqueue.models.enums import ExecutionStatus
+from execqueue.runner.config import RunnerConfig
+from execqueue.runner.execution_chain import ExecutionChain
+from execqueue.runner.validation_pipeline import ValidationPipeline
+from execqueue.runner.validator import MockValidator
+from execqueue.db.session import get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +326,7 @@ class WorkflowExecutor:
         task_ctx: "PreparedExecutionContext",
         session_id: str,
     ) -> TaskResult:
-        """Actually execute a task (extracted for timeout handling).
+        """Actually execute a task using the ExecutionChain.
 
         Args:
             task_id: Task to execute
@@ -337,22 +347,73 @@ class WorkflowExecutor:
 
         logger.info(f"Executing task {task_id} in session {session_id}")
 
-        # Placeholder: Simulate execution
-        # await self._client.dispatch_message(session_id, prompt)
+        # Create a TaskExecution object for this task
+        execution = TaskExecution(
+            task_id=task_id,
+            runner_id="workflow_executor_placeholder",  # Would be set properly in real impl
+            correlation_id=session_id,
+            status=ExecutionStatus.RESULT_INSPECTION.value,
+            worktree_path=task_ctx.worktree_path,
+            branch_name=task_ctx.branch_name,
+            commit_sha_after="abc123def456",  # Would come from actual execution
+        )
 
-        # If this is a write task, use git_manager for commits
-        # if task_ctx.is_write_task:
-        #     commit_sha = await self._git_manager.commit_changes(
-        #         worktree_path=Path(task_ctx.worktree_path),
-        #         message=f"Task {task_id} completed"
-        #     )
+        # In a real implementation, we would:
+        # 1. Dispatch the task to OpenCode
+        # 2. Wait for the result
+        # 3. Extract the commit SHA and other metadata from the result
+        
+        # For now, we assume the task produces a write result and use ExecutionChain
+        # Create a mock validator for demonstration purposes
+        validator = MockValidator(always_pass=True)
+        validation_pipeline = ValidationPipeline(validators=[validator])
+
+        # Create ExecutionChain
+        # Note: In a real implementation, this would come from proper configuration
+        config = RunnerConfig.create_default()
+        execution_chain = ExecutionChain(config=config)
+
+        # Execute the chain
+        try:
+            async with get_db_session() as db_session:
+                # Set the session on the execution
+                execution.id = execution.id  # Ensure ID is set
+                
+                # Update the execution with basic information
+                db_session.add(execution)
+                db_session.flush()  # Get the ID without committing
+                
+                success = await execution_chain.execute(
+                    session=db_session,
+                    execution=execution,
+                    validation_pipeline=validation_pipeline,
+                    validation_commands=["echo 'Validation passed'"],  # Simple validation command
+                )
+                
+                # Commit the transaction
+                db_session.commit()
+                
+                if success:
+                    logger.info(f"Task {task_id} executed successfully via ExecutionChain")
+                    status = "DONE"
+                    error_message = None
+                else:
+                    logger.warning(f"Task {task_id} failed in ExecutionChain")
+                    status = "FAILED"
+                    error_message = "ExecutionChain failed"
+                    
+        except Exception as e:
+            logger.error(f"Task {task_id} failed with exception: {e}", exc_info=True)
+            status = "FAILED"
+            error_message = str(e)
 
         duration = time.time() - start_time
 
         return TaskResult(
             task_id=task_id,
-            status="DONE",
+            status=status,
             opencode_session_id=session_id,
             worktree_path=task_ctx.worktree_path,
             duration_seconds=duration,
+            error_message=error_message,
         )

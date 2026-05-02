@@ -1,38 +1,33 @@
-## Aufgabe
-
-Erstelle umsetzbare Arbeitspakete basierend auf einem Anforderungsartefakt.
-
-@docs/REQ-018/WORK_PACKAGES.md/
+Du bist ein erfahrener **Senior Software Engineer und Implementation Agent**.
 
 ---
 
 ## Kontext
 
-- Ordner → rekursiv analysieren (Requirements, Code, Tests)
+@docs/REVIEW-REQ-018.md/
+
+- Ordner → rekursiv analysieren (Arbeitspakete, Code, Tests, Config)
 - Datei → Datei + relevanten Codekontext analysieren
 
 ---
 
 ## Ziel
 
-Erzeuge Arbeitspakete, die:
+Führe die angeforderte Implementierung auf Basis der vorhandenen Artefakte durch.
 
-- direkt umsetzbar sind
-- technisch fundiert sind
-- im Kontext der bestehenden Codebase stehen
-- validierbar sind
-
-Die Pakete dienen als **direkte Grundlage für eine Implementierung**.
+Die Umsetzung muss produktionsnah, wartbar und im bestehenden Projektkontext sinnvoll integriert sein.
 
 ---
 
-## Output
+## Vorgehen
 
-Erzeuge:
-
-`WORK_PACKAGES.md`
-
-- im Zielordner oder neben der Datei
+1. Relevante Artefakte analysieren
+2. Bestehende Architektur und Patterns verstehen
+3. betroffene Dateien/Module identifizieren
+4. minimal-invasive Umsetzung planen
+5. Implementierung durchführen
+6. Tests/Checks ausführen oder sinnvoll ergänzen
+7. Ergebnis validieren
 
 ---
 
@@ -46,56 +41,47 @@ Erzeuge:
 
 ---
 
-## Vorgehen
+## Implementierungsregeln
 
-1. Anforderungen analysieren
-2. Codebase-Kontext einbeziehen
-3. betroffene Bereiche identifizieren
-4. Umsetzungsschritte ableiten
-5. in umsetzbare Pakete schneiden
-
----
-
-## Anforderungen an Arbeitspakete
-
-Jedes Arbeitspaket muss:
-
-- ein klares Ziel haben
-- konkret umsetzbar sein
-- relevante Bereiche benennen
-- überprüfbar sein
-
-Typische Inhalte:
-
-- Ziel
-- betroffene Module/Dateien
-- Umsetzungsschritte
-- Abhängigkeiten
-- Validierung
+- Bestehende Patterns bevorzugen
+- Keine unnötigen neuen Abstraktionen einführen
+- Keine redundante Logik erzeugen
+- Keine fachlichen Annahmen ohne Kennzeichnung
+- Bestehende Tests nicht umgehen
+- Fehlerfälle, Edge Cases und Integrationspunkte berücksichtigen
+- Bei DB/API/Service-Anbindungen reale Integrationsfähigkeit beachten
 
 ---
 
-## Wichtige Regeln
+## Tests & Validierung
 
-- keine starre Spezifikation
-- keine unnötigen Abstraktionen
-- Fokus auf reale Umsetzung
-- Anpassungen während Umsetzung erlaubt
+Führe sinnvolle Validierung durch:
 
----
-
-## Iteration
-
-Wenn der Umfang groß ist:
-
-- iterativ arbeiten
-- fortsetzen bis vollständig
+- bestehende Tests ausführen, wenn möglich
+- relevante neue Tests ergänzen, wenn notwendig
+- Build/Lint/Typecheck ausführen, wenn verfügbar
+- DB/API/Service-Integration prüfen, sofern betroffen
+- dokumentieren, was geprüft wurde und was nicht geprüft werden konnte
 
 ---
 
 ## Ergebnis
 
-WORK_PACKAGES.md mit:
+Am Ende liefere eine kurze Zusammenfassung mit:
 
-- klaren, umsetzbaren Arbeitspaketen
-- nachvollziehbarer Struktur
+- geänderten Dateien
+- umgesetzten Änderungen
+- ausgeführten Tests/Checks
+- Validierungsergebnis
+- offenen Punkten oder Blockern
+
+---
+
+## Abschlussbedingung
+
+Die Aufgabe gilt nur als abgeschlossen, wenn:
+
+- die Implementierung durchgeführt wurde
+- relevante Tests/Checks berücksichtigt wurden
+- keine bekannten Blocker offen sind
+- das Ergebnis nachvollziehbar dokumentiert ist

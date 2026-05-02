@@ -17,17 +17,32 @@ import asyncio
 import logging
 import signal
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
 from execqueue.db.session import get_db_session
+from execqueue.db.models import Task
+from execqueue.orchestrator.workflow_models import Workflow
 from execqueue.opencode.client import OpenCodeClient
 from execqueue.runner.config import RunnerConfig
 from execqueue.runner.dispatch import PromptDispatcher
 from execqueue.runner.polling import poll_and_claim_tasks
+from execqueue.runner.recovery import RecoveryService
+from execqueue.runner.result_inspector import inspect_task_result, InspectionResult
 from execqueue.runner.validator import Validator
 from execqueue.runner.watchdog import Watchdog
+from execqueue.runner.validation_pipeline import (
+    ValidationPipeline,
+    ValidatorRegistry,
+    AggregationStrategy,
+)
+from execqueue.runner.validation_models import ValidationStatus
+from execqueue.runner.commit_adopter import adopt_commit_with_lifecycle
+from execqueue.runner.worktree_cleanup import WorktreeCleanupService
+from execqueue.runner.worktree_manager import GitWorktreeManager
+from execqueue.models.enums import ExecutionStatus, EventType
 from execqueue.models.task_execution import TaskExecution
 from execqueue.orchestrator.models import PreparedExecutionContext
 
@@ -35,15 +50,18 @@ logger = logging.getLogger(__name__)
 
 
 class Runner:
-    """Task execution runner for REQ-012.
+    """Task execution runner for REQ-012 with REQ-021 integration.
 
     The runner polls for prepared tasks, claims them atomically, and
-    processes them according to the REQ-012 lifecycle.
+    processes them according to the REQ-012 lifecycle with REQ-021
+    validation and commit adoption support.
 
     Attributes:
         config: Runner configuration
         _running: Internal flag indicating if runner is running
         _validator: Optional validator for execution results
+        _validation_pipeline: Optional validation pipeline for multiple validators
+        _worktree_cleanup: Worktree cleanup service for REQ-021
         _watchdog: Optional watchdog for session keep-alive
     """
 
@@ -52,17 +70,50 @@ class Runner:
         config: RunnerConfig | None = None,
         validator: Validator | None = None,
         opencode_client: OpenCodeClient | None = None,
+        worktree_root: str | None = None,
+        require_validation: bool = True,
     ):
-        """Initialize the runner.
+        """Initialize the runner with REQ-021 integration.
 
         Args:
             config: Runner configuration. If None, creates default config.
             validator: Optional validator for execution results.
                       If None, no validation is performed.
             opencode_client: Optional OpenCode client. If None, creates default client.
+            worktree_root: Root directory for worktrees (for cleanup service).
+                          If None, cleanup is disabled.
+            require_validation: If True (default), block adoption on validation failure.
         """
         self.config = config or RunnerConfig.create_default()
         self._validator = validator
+        self._validation_pipeline: ValidationPipeline | None = None
+        self._require_validation = require_validation
+        
+        # Initialize validation pipeline if validator is provided or enabled in config
+        if validator or self.config.validation_enabled:
+            validators = [validator] if validator else []
+            self._validation_pipeline = ValidationPipeline(
+                validators=validators,
+                aggregation=AggregationStrategy.all_passed,
+                fail_fast=self.config.validation_fail_fast,
+            )
+        
+        # Initialize worktree cleanup service based on config
+        self._worktree_cleanup: WorktreeCleanupService | None = None
+        if self.config.worktree_cleanup_enabled:
+            worktree_root = worktree_root or self.config.worktree_root
+            self._worktree_cleanup = WorktreeCleanupService(
+                worktree_root=worktree_root,
+                max_retries=self.config.worktree_cleanup_max_retries,
+                force_cleanup=self.config.worktree_cleanup_force,
+            )
+        
+        # Initialize GitWorktreeManager for REQ-021 metadata management
+        self._worktree_manager = GitWorktreeManager(
+            worktree_root=self.config.worktree_root,
+            max_concurrent=self.config.worktree_max_concurrent,
+        )
+        
         self._watchdog = Watchdog(self.config)
         self._opencode_client = opencode_client or OpenCodeClient()
         self._dispatcher = PromptDispatcher(self._opencode_client)
@@ -112,11 +163,11 @@ class Runner:
     async def _process_execution(
         self, session: Session, execution: TaskExecution
     ):
-        """Process a claimed execution.
+        """Process a claimed execution with REQ-021 lifecycle.
 
-        This is a placeholder for future processing logic.
-        Currently, it only logs the claimed execution and optionally
-        runs validation.
+        This method implements the full execution lifecycle:
+        1. Run execution (placeholder for actual work)
+        2. Use ExecutionChain to coordinate validation → adoption → cleanup
 
         Args:
             session: Database session
@@ -127,7 +178,10 @@ class Runner:
             f"(status: {execution.status})"
         )
 
-        # TODO: Implement actual processing logic
+        # Record activity for watchdog (resets idle timer)
+        self._watchdog.record_activity()
+
+        # TODO: Implement actual execution logic
         # This is where the runner would:
         # 1. Set status to DISPATCHING
         # 2. Dispatch prompt to OpenCode
@@ -135,37 +189,59 @@ class Runner:
         # 4. Handle SSE events, result inspection, etc.
         # (These are covered in subsequent REQ-012 packages)
 
-        # Record activity for watchdog (resets idle timer)
-        self._watchdog.record_activity()
-
-        # Run validator if configured (only logs, does not affect status)
-        if self._validator:
-            await self._run_validator(execution)
-
-    async def _run_validator(self, execution: TaskExecution) -> None:
-        """Run the validator on an execution and log the result.
-
-        The validator result is only logged and does not affect the
-        execution status. Exceptions are caught and logged.
-
-        Args:
-            execution: The TaskExecution to validate
-        """
-        try:
-            result = await self._validator.validate(execution)
-            if result:
-                logger.info(
-                    f"Validation passed for execution {execution.id}"
-                )
-            else:
-                logger.warning(
-                    f"Validation failed for execution {execution.id}"
-                )
-        except Exception as e:
-            logger.warning(
-                f"Validator exception for execution {execution.id}: {e}",
-                exc_info=True,
+        # For now, check if execution is already done (simulated)
+        if execution.status != ExecutionStatus.DONE.value:
+            logger.info(
+                f"Execution {execution.id} not yet complete, skipping adoption",
+                extra={"execution_id": str(execution.id), "status": execution.status}
             )
+            return
+
+        # Use ExecutionChain to coordinate the complete REQ-021 workflow
+        if self._validation_pipeline:
+            from execqueue.runner.execution_chain import ExecutionChain
+            
+            execution_chain = ExecutionChain(
+                worktree_root=self.config.worktree_root,
+                target_branch=self.config.adoption_target_branch,
+                max_retries=self.config.worktree_cleanup_max_retries,
+                force_cleanup=self.config.worktree_cleanup_force,
+            )
+            
+            try:
+                success = await execution_chain.execute(
+                    session=session,
+                    execution=execution,
+                    validation_pipeline=self._validation_pipeline,
+                    validation_commands=self.config.adoption_validation_commands,
+                )
+                
+                if success:
+                    logger.info(
+                        f"Execution chain completed successfully for execution {execution.id}",
+                        extra={"execution_id": str(execution.id)}
+                    )
+                else:
+                    logger.warning(
+                        f"Execution chain completed with issues for execution {execution.id}",
+                        extra={"execution_id": str(execution.id)}
+                    )
+                    
+            except Exception as e:
+                logger.error(
+                    f"Execution chain failed for execution {execution.id}: {e}",
+                    extra={"execution_id": str(execution.id)},
+                    exc_info=True,
+                )
+        else:
+            logger.info(
+                f"No validation pipeline configured, skipping execution chain for execution {execution.id}",
+                extra={"execution_id": str(execution.id)}
+            )
+
+
+
+
 
     async def stop(self):
         """Stop the runner and watchdog gracefully."""

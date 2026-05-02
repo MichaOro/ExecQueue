@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from execqueue.orchestrator.batch_spec import BatchSpec
 from execqueue.orchestrator.models import (
     BatchPlan,
     BatchType,
@@ -181,29 +182,35 @@ class BatchPlanner:
     
     The planner produces transient plans that are not persisted until
     atomic locking (AP 04) succeeds.
+    
+    The max_batch_size parameter is now deprecated in favor of BatchSpec.max_size.
+    It is kept for backward compatibility but will be ignored if a spec is provided.
     """
     
     def __init__(self, max_batch_size: int = 10):
         """Initialize batch planner.
         
         Args:
-            max_batch_size: Maximum tasks per batch
+            max_batch_size: Maximum tasks per batch (deprecated, use BatchSpec)
         """
         self.max_batch_size = max_batch_size
     
     def create_batch_plan(
         self,
         classifications: list[TaskClassification],
+        spec: BatchSpec | None = None,
     ) -> BatchPlan:
         """Create a batch plan from task classifications.
         
         Args:
             classifications: List of task classifications
+            spec: BatchSpec defining execution constraints (defaults to conservative)
             
         Returns:
-            BatchPlan with included/excluded tasks
+            BatchPlan with included/excluded tasks and the provided spec
         """
         batch_id = f"batch-{datetime.utcnow().isoformat()}-{uuid4().hex[:8]}"
+        batch_spec = spec or BatchSpec.default()
         
         # Separate read-only and write tasks
         readonly_tasks: list[TaskClassification] = []
@@ -288,20 +295,23 @@ class BatchPlanner:
             task_ids=tuple(included_ids),
             excluded_task_ids=tuple(excluded_ids),
             exclusion_reasons=exclusion_reasons,
+            spec=batch_spec,
             created_at=datetime.utcnow(),
         )
     
     def plan_for_single_task(
         self,
         classification: TaskClassification,
+        spec: BatchSpec | None = None,
     ) -> BatchPlan:
         """Create a batch plan for a single task.
         
         Args:
             classification: Single task classification
+            spec: BatchSpec defining execution constraints (defaults to conservative)
             
         Returns:
-            BatchPlan with single task
+            BatchPlan with single task and the provided spec
         """
         batch_id = f"single-{datetime.utcnow().isoformat()}-{uuid4().hex[:8]}"
         batch_type = (
@@ -309,10 +319,12 @@ class BatchPlanner:
             if classification.effective_runner_mode == RunnerMode.READ_ONLY
             else BatchType.WRITE_SEQUENTIAL
         )
+        batch_spec = spec or BatchSpec.default()
         
         return BatchPlan(
             batch_id=batch_id,
             batch_type=batch_type,
             task_ids=(classification.task_id,),
+            spec=batch_spec,
             created_at=datetime.utcnow(),
         )

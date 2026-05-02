@@ -3,6 +3,7 @@
 from enum import Enum
 from functools import lru_cache
 from urllib.parse import urlsplit
+import os
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -187,13 +188,27 @@ class Settings(BaseSettings):
         return self.opencode_mode is OpenCodeOperatingMode.ENABLED
 
     def model_post_init(self, __context: object) -> None:
-        """Validate environment-specific database settings with no prod/test fallback."""
+        """Validate environment-specific database settings with no prod/test fallback.
+
+        Additionally, configure LiteLLM globally so that Bedrock providers (e.g. qwen3‑coder‑480b)
+        automatically receive a dummy ``tools`` payload. This is achieved by setting
+        ``litellm.modify_params = True`` unless the environment variable ``LITELLM_MODIFY_PARAMS``
+        explicitly disables it.
+        """
         if self.is_test_environment and self.database_url and self.database_url_test:
             if self.database_url == self.database_url_test:
                 raise ValueError(
                     "DATABASE_URL and DATABASE_URL_TEST must not point to the same database."
                 )
-
+        # LiteLLM global configuration (optional import)
+        try:
+            import litellm  # type: ignore
+        except Exception:  # pragma: no cover
+            litellm = None
+        else:
+            env_val = os.getenv("LITELLM_MODIFY_PARAMS", "").lower()
+            if env_val not in {"0", "false", "no"}:
+                litellm.modify_params = True
 
 @lru_cache
 def get_settings() -> Settings:

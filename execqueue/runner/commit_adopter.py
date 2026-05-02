@@ -16,8 +16,16 @@ from pathlib import Path
 from typing import Callable
 from uuid import UUID
 
+from sqlalchemy.orm import Session
+
 from execqueue.models.enums import ExecutionStatus, EventType
 from execqueue.orchestrator.models import RunnerMode
+from execqueue.models.task_execution import TaskExecution
+from execqueue.observability import (
+    record_cherry_pick_attempt,
+    record_cherry_pick_success,
+    record_adoption_conflict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +307,9 @@ class CommitAdopter:
         logger.info(
             f"Cherry-picking commit {self.task_commit_sha} to {self.target_branch}"
         )
+        
+        # Record metrics
+        record_cherry_pick_attempt()
 
         cherry_pick_result = self._run_git_command(
             ["cherry-pick", self.task_commit_sha],
@@ -324,6 +335,10 @@ class CommitAdopter:
                 )
 
                 logger.warning(result.error_message)
+                
+                # Record metrics
+                record_adoption_conflict()
+                
                 return result
 
             result.error_message = f"Cherry-pick failed: {cherry_pick_result.stderr}"
@@ -356,6 +371,8 @@ class CommitAdopter:
                 f"Successfully adopted commit {self.task_commit_sha} "
                 f"as {adopted_sha} in {self.target_branch}"
             )
+            # Record metrics
+            record_cherry_pick_success()
         else:
             result.error_message = "Adoption verification failed: HEAD unchanged"
             result.needs_review = True
@@ -390,3 +407,111 @@ async def adopt_commit(
         validation_commands=validation_commands,
     )
     return adopter.adopt()
+
+
+async def adopt_commit_with_lifecycle(
+    session: Session,
+    execution: TaskExecution,
+    target_worktree_path: str,
+    target_branch: str,
+    validation_commands: list[str] | None = None,
+) -> AdoptionResult:
+    """Adopt commit with full lifecycle tracking per REQ-021 Section 5.
+
+    This function:
+    1. Updates execution status to ADOPTING_COMMIT
+    2. Sets adoption_status to in_progress
+    3. Performs the adoption
+    4. Updates execution based on result (success, failed, review)
+    5. Persists adoption_status and adoption_error
+
+    Args:
+        session: Database session
+        execution: TaskExecution to update
+        target_worktree_path: Path to target branch worktree
+        target_branch: Name of target branch
+        validation_commands: Optional validation commands
+
+    Returns:
+        AdoptionResult with adoption status
+    """
+    from execqueue.runner.commit_adopter import CommitAdopter
+
+    logger.info(
+        f"Starting commit adoption for execution {execution.id}",
+        extra={
+            "execution_id": str(execution.id),
+            "task_id": str(execution.task_id),
+            "commit_sha": execution.commit_sha_after,
+        }
+    )
+
+    # Step 1: Update status to ADOPTING_COMMIT
+    execution.status = ExecutionStatus.ADOPTING_COMMIT.value
+    execution.adoption_status = "in_progress"
+    session.commit()
+
+    # Step 2: Create adopter and perform adoption
+    if not execution.commit_sha_after:
+        result = AdoptionResult(
+            success=False,
+            error_message="No commit SHA available for adoption",
+            needs_review=True,
+        )
+        execution.adoption_status = "failed"
+        execution.adoption_error = result.error_message
+        session.commit()
+        return result
+
+    adopter = CommitAdopter(
+        target_worktree_path=target_worktree_path,
+        target_branch=target_branch,
+        task_worktree_path=execution.worktree_path or "",
+        task_commit_sha=execution.commit_sha_after,
+        validation_commands=validation_commands,
+    )
+
+    result = adopter.adopt()
+
+    # Step 3: Update execution based on result
+    execution.adopted_commit_sha = result.adopted_commit_sha
+
+    if result.success and result.validation_passed:
+        execution.status = ExecutionStatus.DONE.value
+        execution.adoption_status = "success"
+        execution.adoption_error = None
+        logger.info(
+            f"Commit adoption succeeded for execution {execution.id}",
+            extra={
+                "execution_id": str(execution.id),
+                "adopted_sha": result.adopted_commit_sha,
+            }
+        )
+
+    elif result.conflict_detected or result.needs_review:
+        execution.status = ExecutionStatus.REVIEW.value
+        execution.adoption_status = "review"
+        execution.adoption_error = result.error_message
+        logger.warning(
+            f"Commit adoption requires review for execution {execution.id}",
+            extra={
+                "execution_id": str(execution.id),
+                "reason": result.error_message,
+            }
+        )
+
+    else:
+        execution.status = ExecutionStatus.FAILED.value
+        execution.adoption_status = "failed"
+        execution.adoption_error = result.error_message
+        logger.error(
+            f"Commit adoption failed for execution {execution.id}",
+            extra={
+                "execution_id": str(execution.id),
+                "error": result.error_message,
+            }
+        )
+
+    session.commit()
+
+    return result

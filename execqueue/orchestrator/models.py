@@ -1,4 +1,12 @@
-"""DTOs and models for REQ-011 orchestrator execution preparation."""
+"""DTOs and models for REQ-011 orchestrator execution preparation.
+
+This module contains batch planning models and task classification data structures
+used in the orchestrator's preparation phase.
+
+Related modules:
+    - batch_spec: Defines execution constraints (BatchSpec)
+    - classification: Task classification logic
+"""
 
 from __future__ import annotations
 
@@ -6,7 +14,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
+
+# Re-export BatchSpec for convenience
+from execqueue.orchestrator.batch_spec import BatchSpec
 
 
 class BatchType(str, Enum):
@@ -58,12 +69,16 @@ class TaskClassification:
 class BatchPlan:
     """Transient batch plan for execution preparation.
     
+    The BatchPlan represents a proposed batch of tasks to execute together.
+    It references a BatchSpec that defines the execution constraints.
+    
     Attributes:
         batch_id: Unique batch identifier
         batch_type: Type of batch (readonly_parallel, write_parallel_isolated, write_sequential)
         task_ids: List of task UUIDs in this batch
         excluded_task_ids: List of excluded task UUIDs
         exclusion_reasons: Reasons for exclusions
+        spec: BatchSpec defining execution constraints (defaults to conservative)
         created_at: When the plan was created
     """
     batch_id: str
@@ -71,6 +86,7 @@ class BatchPlan:
     task_ids: tuple[UUID, ...]
     excluded_task_ids: tuple[UUID, ...] = field(default_factory=tuple)
     exclusion_reasons: dict[UUID, str] = field(default_factory=dict)
+    spec: BatchSpec = field(default_factory=BatchSpec.default)
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 

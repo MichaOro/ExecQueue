@@ -173,6 +173,22 @@ Detailed prompts, skills, and commands are located in `.opencode/`.
 The Runner module handles task execution polling, claiming, and processing.
 It supports optional Validator and Watchdog extensions.
 
+## WRITE Task Validation (REQ-021)
+
+The Runner now includes comprehensive validation for WRITE tasks as part of REQ-021.
+This includes file change validation, size limits, dangerous pattern detection,
+and code compilation checks.
+
+### WriteTaskValidator
+
+A specialized validator for WRITE tasks that checks:
+- File changes exist
+- File sizes within limits
+- No dangerous code patterns
+- Code compiles correctly
+
+For more details, see [WRITE_TASK_VALIDATION.md](./docs/WRITE_TASK_VALIDATION.md)
+
 ### Watchdog Keep-Alive
 
 The Watchdog sends periodic keep-alive pings to an OpenCode session during
@@ -322,6 +338,14 @@ Minimal test setup with pytest.
 ```bash
 py -m pytest
 ```
+
+### New Tests for REQ-021
+
+Added comprehensive tests for WRITE task validation:
+- `test_write_task_validator.py` - Unit tests for WriteTaskValidator
+- `test_execution_chain_config.py` - Tests for ExecutionChain configuration
+- `test_execution_chain_integration.py` - Integration tests for ExecutionChain
+- `test_write_task_validator_registry.py` - Tests for ValidatorRegistry integration
 
 ### Validation focus
 

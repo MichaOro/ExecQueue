@@ -66,6 +66,22 @@ class TestDependencyGraphConstruction:
         for node in graph.nodes:
             assert graph.in_degree[node] >= 0
 
+    def test_duplicate_nodes_handled_in_set(self):
+        """Test that duplicate nodes in the nodes set are naturally deduplicated."""
+        from uuid import uuid4
+        # Create the same UUID twice (simulating duplicate input)
+        node_id = uuid4()
+        
+        # Construct with what should be duplicates
+        graph = DependencyGraph(
+            nodes={node_id, node_id},  # Set naturally deduplicates
+            edges={node_id: []},
+        )
+        
+        # Should only have one node
+        assert len(graph.nodes) == 1
+        assert node_id in graph.nodes
+
     def test_invalid_dependency_raises_value_error(self):
         """Test that referencing unknown dependency raises ValueError."""
         # Create a graph manually with invalid reference
@@ -122,6 +138,88 @@ class TestTopologicalSort:
         assert len(batches[0]) == 1  # A
         assert len(batches[1]) == 2  # B, C
         assert len(batches[2]) == 1  # D
+
+    def test_complex_parallel_pattern(self):
+        """Test complex parallel pattern with multiple forks and joins.
+        
+        Pattern:
+               B -> D
+              /      \
+        A ->          -> F
+              \      /
+               C -> E
+               
+        Expected batches: [A], [B,C], [D,E], [F]
+        """
+        ctx = _make_ctx({
+            "A": [], 
+            "B": ["A"], 
+            "C": ["A"], 
+            "D": ["B"], 
+            "E": ["C"], 
+            "F": ["D", "E"]
+        })
+        graph = DependencyGraph.from_context(ctx)
+        batches = graph.topological_sort()
+        assert len(batches) == 4
+        assert len(batches[0]) == 1  # A
+        assert len(batches[1]) == 2  # B, C
+        assert len(batches[2]) == 2  # D, E
+        assert len(batches[3]) == 1  # F
+
+    def test_duplicate_dependencies_handled_correctly(self):
+        """Test that duplicate dependencies are handled correctly.
+        
+        When a task specifies the same dependency multiple times,
+        it should still be treated as a single dependency.
+        """
+        from uuid import uuid4
+        a, b, c = uuid4(), uuid4(), uuid4()
+        
+        # Create graph where C depends on B twice
+        graph = DependencyGraph(
+            nodes={a, b, c},
+            edges={
+                a: [],      # A has no dependencies
+                b: [a],     # B depends on A
+                c: [b, b],  # C depends on B twice (duplicate)
+            },
+        )
+        
+        # Should still produce valid topological sort
+        batches = graph.topological_sort()
+        assert len(batches) == 3
+        assert len(batches[0]) == 1  # A
+        assert len(batches[1]) == 1  # B
+        assert len(batches[2]) == 1  # C
+        
+        # Verify in_degree counts (should be 2 for C since it has 2 dependencies)
+        assert graph.in_degree[c] == 2
+        assert graph.in_degree[b] == 1
+        assert graph.in_degree[a] == 0
+
+    def test_deterministic_ordering(self):
+        """Test that topological sort produces deterministic ordering.
+        
+        When multiple tasks are available in the same batch, they should
+        be ordered consistently.
+        """
+        # Create multiple runs and verify consistent ordering
+        ctx = _make_ctx({
+            "A": [], "B": [], "C": [],  # Three independent tasks
+            "D": ["A", "B", "C"]        # D depends on all three
+        })
+        
+        results = []
+        for _ in range(10):
+            graph = DependencyGraph.from_context(ctx)
+            batches = graph.topological_sort()
+            # Convert to string representation for comparison
+            result_str = "|".join(",".join(str(t) for t in batch) for batch in batches)
+            results.append(result_str)
+        
+        # All results should be identical (deterministic)
+        assert all(r == results[0] for r in results)
 
     def test_cycle_returns_empty_list(self):
         """Test graph with cycle returns empty batches."""

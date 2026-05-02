@@ -9,7 +9,7 @@ This module handles:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import and_, select
@@ -117,7 +117,7 @@ class StaleQueuedRecovery:
         Returns:
             List of stale queued tasks
         """
-        stale_threshold = datetime.utcnow() - self.stale_timeout
+        stale_threshold = datetime.now(timezone.utc) - self.stale_timeout
         
         query = (
             select(Task)
@@ -225,7 +225,7 @@ class StaleQueuedRecovery:
                 task.preparation_attempt_count = 0
                 task.last_preparation_error = None
             
-            task.updated_at = datetime.utcnow()
+            task.updated_at = datetime.now(timezone.utc)
             
             results.append((task, new_status, reason))
             

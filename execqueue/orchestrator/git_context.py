@@ -1,8 +1,13 @@
-"""Git context preparation for REQ-011 write tasks.
+"""Git context preparation for REQ-011 write tasks with REQ-021 integration.
 
 This module handles branch and worktree preparation for write tasks.
 It implements safety guards against destructive operations and ensures
 proper isolation between tasks.
+
+REQ-021 Integration:
+- WorktreeMetadata persistence via GitWorktreeManager
+- Lifecycle tracking (ACTIVE, CLEANED, ERROR)
+- Orphaned cleanup support
 """
 
 from __future__ import annotations
@@ -16,7 +21,10 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.orm import Session
+
 from execqueue.orchestrator.models import PreparationError, PreparationErrorType
+from execqueue.runner.worktree_manager import GitWorktreeManager, WorktreeMetadataResult
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +66,7 @@ class GitContextPreparer:
         worktree_root: Path,
         base_repo_path: Path,
         timeout_seconds: int = 30,
+        enable_metadata_persistence: bool = True,
     ):
         """Initialize Git context preparer.
         
@@ -65,10 +74,21 @@ class GitContextPreparer:
             worktree_root: Root directory for worktrees
             base_repo_path: Path to base repository
             timeout_seconds: Timeout for Git commands
+            enable_metadata_persistence: If True, persist WorktreeMetadata (REQ-021)
         """
         self.worktree_root = worktree_root.resolve()
         self.base_repo_path = base_repo_path.resolve()
         self.timeout_seconds = timeout_seconds
+        self.enable_metadata_persistence = enable_metadata_persistence
+        
+        # Initialize GitWorktreeManager for metadata persistence (REQ-021)
+        if enable_metadata_persistence:
+            self._worktree_manager = GitWorktreeManager(
+                worktree_root=str(self.worktree_root),
+                branch_prefix="execqueue/task",
+            )
+        else:
+            self._worktree_manager = None
         
         # Ensure worktree root exists
         self.worktree_root.mkdir(parents=True, exist_ok=True)
@@ -248,14 +268,18 @@ class GitContextPreparer:
         task_number: int,
         explicit_branch: str | None = None,
         reuse_existing: bool = True,
+        workflow_id: UUID | None = None,
+        db_session: Session | None = None,
     ) -> GitContext:
-        """Prepare Git context for a write task.
+        """Prepare Git context for a write task with REQ-021 metadata persistence.
         
         Args:
             task_id: Task UUID
             task_number: Task number
             explicit_branch: Optional explicit branch name
             reuse_existing: Whether to reuse existing worktree
+            workflow_id: Optional workflow UUID for metadata persistence (REQ-021)
+            db_session: Optional database session for metadata persistence
             
         Returns:
             GitContext with branch/worktree info
@@ -340,6 +364,45 @@ class GitContextPreparer:
                 message=f"Worktree path {worktree_path} is outside root {self.worktree_root}",
                 task_id=task_id,
             )
+        
+        # REQ-021: Persist WorktreeMetadata if enabled and workflow_id provided
+        if (
+            self.enable_metadata_persistence 
+            and self._worktree_manager is not None 
+            and workflow_id is not None
+            and db_session is not None
+        ):
+            try:
+                import asyncio
+                result = asyncio.run(
+                    self._worktree_manager.create_or_get_worktree(
+                        workflow_id=workflow_id,
+                        task_id=task_id,
+                        base_branch=branch_name.split("/")[-1] if "/" in branch_name else branch_name,
+                        session=db_session,
+                    )
+                )
+                if result.error_message:
+                    logger.warning(
+                        f"Failed to create worktree metadata: {result.error_message}",
+                        extra={"task_id": str(task_id), "workflow_id": str(workflow_id)}
+                    )
+                else:
+                    logger.info(
+                        f"Created worktree metadata: {result.metadata.id}",
+                        extra={
+                            "task_id": str(task_id), 
+                            "workflow_id": str(workflow_id),
+                            "metadata_id": str(result.metadata.id) if result.metadata else None
+                        }
+                    )
+            except Exception as e:
+                # Log but don't fail - Git context preparation succeeded
+                logger.warning(
+                    f"Worktree metadata persistence failed: {e}",
+                    extra={"task_id": str(task_id), "workflow_id": str(workflow_id)},
+                    exc_info=True,
+                )
         
         return GitContext(
             branch_name=branch_name,

@@ -77,7 +77,6 @@ class TaskStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
-    DONE = "completed"
 
 
 class Project(Base):
@@ -337,3 +336,108 @@ class Task(Base):
 
 from execqueue.models.task_execution import TaskExecution
 from execqueue.models.task_execution_event import TaskExecutionEvent
+
+
+class WorktreeStatus(str, Enum):
+    """Worktree lifecycle states for REQ-021."""
+
+    ACTIVE = "active"
+    CLEANED = "cleaned"
+    ERROR = "error"
+
+
+class WorktreeMetadata(Base):
+    """Centralized worktree metadata for REQ-021.
+
+    Tracks the lifecycle of git worktrees created for task execution,
+    enabling proper cleanup and preventing resource leaks.
+    """
+
+    __tablename__ = "worktree_metadata"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'cleaned', 'error')",
+            name="ck_worktree_metadata_status_allowed",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workflow_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("workflow.id"),
+        nullable=False,
+    )
+    task_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("task.id"),
+        nullable=False,
+    )
+    path: Mapped[str] = mapped_column(
+        String(512),
+        nullable=False,
+        unique=True,
+        comment="Absolute path to the worktree directory",
+    )
+    branch: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Git branch name for this worktree",
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=WorktreeStatus.ACTIVE.value,
+        server_default=WorktreeStatus.ACTIVE.value,
+        comment="Worktree lifecycle state: active, cleaned, error",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="Timestamp when worktree was created",
+    )
+    cleaned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when worktree was cleaned up",
+    )
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Error message if worktree entered error state",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<WorktreeMetadata(id={self.id}, workflow_id={self.workflow_id}, "
+            f"task_id={self.task_id}, path={self.path}, status={self.status})>"
+        )
+
+    @property
+    def is_active(self) -> bool:
+        """Check if worktree is currently active."""
+        return self.status == WorktreeStatus.ACTIVE.value
+
+    @property
+    def is_cleaned(self) -> bool:
+        """Check if worktree has been cleaned up."""
+        return self.status == WorktreeStatus.CLEANED.value
+
+    @property
+    def is_in_error(self) -> bool:
+        """Check if worktree is in error state."""
+        return self.status == WorktreeStatus.ERROR.value
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary representation."""
+        return {
+            "id": str(self.id),
+            "workflow_id": str(self.workflow_id),
+            "task_id": str(self.task_id),
+            "path": self.path,
+            "branch": self.branch,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "cleaned_at": self.cleaned_at.isoformat() if self.cleaned_at else None,
+            "error_message": self.error_message,
+        }

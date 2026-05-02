@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from execqueue.health.models import HealthCheckResult
+from execqueue.health.models import HealthCheckResult, HealthStatus
 from execqueue.settings import get_settings
 
 
@@ -18,25 +18,25 @@ def get_api_healthcheck() -> HealthCheckResult:
     except httpx.TimeoutException:
         return HealthCheckResult(
             component="api",
-            status="DEGRADED",
-            detail="API health check timed out.",
+status=HealthStatus.DEGRADED,
+             detail="API health check timed out.",
         )
     except Exception as exc:
         return HealthCheckResult(
             component="api",
-            status="DEGRADED",
+            status=HealthStatus.DEGRADED,
             detail=f"API health check failed: {exc}",
         )
 
     if response.status_code == 200:
         return HealthCheckResult(
             component="api",
-            status="OK",
+            status=HealthStatus.OK,
             detail="API responded successfully.",
         )
 
     return HealthCheckResult(
         component="api",
-        status="DEGRADED",
+        status=HealthStatus.DEGRADED,
         detail=f"API health check returned status {response.status_code}.",
     )

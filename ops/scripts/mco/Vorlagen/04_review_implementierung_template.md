@@ -99,8 +99,8 @@ Wenn der Umfang groß ist:
 ---
 
 ## Ergebnis
-
-`REVIEW.md` mit:
+@INPUT_PATH
+Erstelle ein Review Markdown Dokument mit den Review ergebnis mit einem passenden Namen und den folgenden Inhalten:
 
 - verständlicher Analyse
 - klaren Risiken
