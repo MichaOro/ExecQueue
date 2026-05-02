@@ -4,7 +4,7 @@ Du bist ein erfahrener **Senior Software Engineer und Implementation Agent**.
 
 ## Kontext
 
-@docs/REVIEW-REQ-018.md/
+@docs/REQ-025_Workflow_for_Requirement_Tasks/
 
 - Ordner → rekursiv analysieren (Arbeitspakete, Code, Tests, Config)
 - Datei → Datei + relevanten Codekontext analysieren

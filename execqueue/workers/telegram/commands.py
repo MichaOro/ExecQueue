@@ -249,12 +249,12 @@ async def create_start(
     if TELEGRAM_KEYBOARD_AVAILABLE:
         keyboard = [
             [
-                InlineKeyboardButton("\ud83d\udcc5 Planning", callback_data=TYPE_PLANNING),
-                InlineKeyboardButton("\ud83d\udee0\ufe0f Execution", callback_data=TYPE_EXECUTION),
+                InlineKeyboardButton("\U0001F4C5 Planning", callback_data=TYPE_PLANNING),
+                InlineKeyboardButton("\U0001F6E0\U0000FE0F Execution", callback_data=TYPE_EXECUTION),
             ],
             [
-                InlineKeyboardButton("\ud83d\udd0d Analysis", callback_data=TYPE_ANALYSIS),
-                InlineKeyboardButton("\ud83d\udcdd Requirement", callback_data=TYPE_REQUIREMENT),
+                InlineKeyboardButton("\U0001F50D Analysis", callback_data=TYPE_ANALYSIS),
+                InlineKeyboardButton("\U0001F4DD Requirement", callback_data=TYPE_REQUIREMENT),
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -293,9 +293,10 @@ async def create_task_type_callback(
 
     if task_type == TYPE_REQUIREMENT:
         await query.edit_message_text(
-            "\ud83d\udcdd *Requirement*\n\n"
+            # 📜  =  \U0001F4DD  (Unicode‑Code‑Point für das “Scroll”‑Emoji)
+            "\U0001F4DD *Requirement*\n\n"
             "Bitte geben Sie den Titel ein:",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
         )
         return CREATE_TITLE
 
@@ -499,6 +500,74 @@ async def _show_existing_branches_direct(
         return _conversation_end()
 
 
+async def _show_existing_branches_callback(
+    query: "CallbackQuery | None", context: "CallbackContext | None"
+) -> int:
+    """Show existing branches using callback query interface."""
+    if not query or context is None:
+        return _conversation_end()
+    
+    try:
+        branches = get_local_branches()
+        if not branches:
+            await query.edit_message_text(
+                "\u26A0\ufe0f *Keine Branches gefunden*\n\n"
+                "Bitte erstelle einen Branch oder w\u00E4hle eine andere Option.",
+                parse_mode="Markdown"
+            )
+            return BRANCH_CHOICE
+        
+        branch_list = "\n".join(f"{i+1}. {b}" for i, b in enumerate(branches[:10]))
+        if len(branches) > 10:
+            branch_list += f"\n... und {len(branches) - 10} weitere"
+        
+        current_branch = _try_get_current_branch()
+        default_line = (
+            f"0 - Aktuellen Branch verwenden ({current_branch})\n"
+            if current_branch
+            else ""
+        )
+        await query.edit_message_text(
+            f"\U0001F33F *W\u00E4hle einen bestehenden Branch* ({len(branches)} verf\u00FCgbar)\n\n"
+            f"{branch_list}\n\n"
+            f"{default_line}"
+            "Nummer eingeben:",
+            parse_mode="Markdown"
+        )
+        return BRANCH_SELECT
+        
+    except GitTimeoutError:
+        logger.warning("Git timeout in show_existing_branches_callback")
+        await query.edit_message_text(
+            "\u23F0 *Zeitueberschreitung*\n\n"
+            "Git-Operation zeitueberschritten. Bitte spaeter erneut versuchen.",
+            parse_mode="Markdown"
+        )
+        return BRANCH_CHOICE
+        
+    except GitRepositoryError as e:
+        logger.error("Git repository error in show_existing_branches_callback: %s", e)
+        await query.edit_message_text(
+            "\u274C *Repository-Fehler*\n\n"
+            "Repository nicht zugreifbar. Bitte pruefen:\n"
+            "\u2022 Git ist installiert\n"
+            "\u2022 Korrektes Verzeichnis\n"
+            "\u2022 Berechtigungen\n\n"
+            "Abbrechen mit /cancel",
+            parse_mode="Markdown"
+        )
+        return _conversation_end()
+        
+    except Exception as e:
+        logger.exception("Unexpected error in show_existing_branches_callback")
+        await query.edit_message_text(
+            "\u274C *Unerwarteter Fehler*\n\n"
+            "Ein unbekannter Fehler ist aufgetreten. Bitte Logs pruefen.",
+            parse_mode="Markdown"
+        )
+        return _conversation_end()
+
+
 async def create_branch_choice(
     update: "Update | None", context: "CallbackContext | None"
 ) -> int:
@@ -541,7 +610,7 @@ async def create_branch_choice(
                 else ""
             )
             await update.message.reply_text(
-                f"\ud83d\udc47 W\u00E4hle einen bestehenden Branch:\n\n{branch_list}\n\n"
+                f"\U0001F447 W\u00E4hle einen bestehenden Branch:\n\n{branch_list}\n\n"
                 f"{default_line}"
                 "Nummer eingeben oder 'x' zum Zurueckgehen:",
                 parse_mode="Markdown"
@@ -575,7 +644,7 @@ async def create_branch_choice(
     elif text == "2":
         # Create new branch - ask for name
         await update.message.reply_text(
-            "\ud83d\udd27 *Neuer Branch*\n\n"
+            "\U0000270F *Neuer Branch*\n\n"
             "Gib den Namen f\u00FCr den neuen Branch ein:\n"
             "(z.B. feature/my-feature oder task-123)",
             parse_mode="Markdown"
@@ -703,6 +772,12 @@ async def create_branch_name(
         return _conversation_end()
     
     context.user_data["branch"] = branch_name
+    # Inform user about branch creation before proceeding to confirmation
+    await update.message.reply_text(
+        f"\u2705 *Branch erstellt*\n\n"
+        f"Branch **{branch_name}** wurde erfolgreich erstellt.",
+        parse_mode="Markdown"
+    )
     return await _send_confirmation_summary(update, context)
 
 
@@ -938,15 +1013,15 @@ async def branch_choice_callback(
     task_type = context.user_data.get("type")
     if task_type != TYPE_REQUIREMENT:
         logger.warning("Branch choice called for non-requirement type: %s", task_type)
-        return await _show_existing_branches_keyboard(update, context)
+        return await _show_existing_branches_callback(query, context)
 
     choice = query.data
     
     if choice == BRANCH_CHOICE_EXISTING:
-        return await _show_existing_branches_keyboard(update, context)
+        return await _show_existing_branches_callback(query, context)
     elif choice == BRANCH_CHOICE_NEW:
         await query.edit_message_text(
-            "\ud83d\udd27 *Neuer Branch*\n\n"
+            "\U0000270F *Neuer Branch*\n\n"
             "Gib den Namen f\u00FCr den neuen Branch ein:\n"
             "(z.B. feature/my-feature)",
             parse_mode="Markdown"
@@ -1125,7 +1200,7 @@ async def create_confirmation_keyboard(
     prompt = context.user_data.get("prompt", "")
 
     summary = (
-        f"\ud83d\udcdd *Zusammenfassung*\n\n"
+        f"\U0001F4DD *Zusammenfassung*\n\n"
         f"Typ: *{task_type}*\n"
     )
     if title:

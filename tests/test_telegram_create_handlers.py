@@ -434,10 +434,11 @@ class TestBranchChoiceCallback:
         update.callback_query = MagicMock()
         update.callback_query.data = BRANCH_CHOICE_EXISTING
         update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_text = AsyncMock()
         context = MagicMock()
         context.user_data = {"type": TYPE_REQUIREMENT}
         
-        with patch("execqueue.workers.telegram.commands._show_existing_branches_keyboard") as mock_show:
+        with patch("execqueue.workers.telegram.commands._show_existing_branches_callback") as mock_show:
             mock_show.return_value = BRANCH_SELECT
             result = await branch_choice_callback(update, context)
             
@@ -470,10 +471,11 @@ class TestBranchChoiceCallback:
         update.callback_query = MagicMock()
         update.callback_query.data = BRANCH_CHOICE_EXISTING
         update.callback_query.answer = AsyncMock()
+        update.callback_query.edit_message_text = AsyncMock()
         context = MagicMock()
         context.user_data = {"type": TYPE_PLANNING}  # Not requirement
         
-        with patch("execqueue.workers.telegram.commands._show_existing_branches_keyboard") as mock_show:
+        with patch("execqueue.workers.telegram.commands._show_existing_branches_callback") as mock_show:
             mock_show.return_value = BRANCH_SELECT
             result = await branch_choice_callback(update, context)
             

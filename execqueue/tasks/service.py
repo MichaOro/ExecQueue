@@ -82,6 +82,7 @@ def create_task(
     created_by_ref: str,
     max_retries: int = DEFAULT_TASK_MAX_RETRIES,
     requirement_id: UUID | None = None,
+    branch_name: str | None = None,
     idempotency_key: str | None = None,
 ) -> Task:
     """Create a task row and return the persisted ORM object.
@@ -99,6 +100,7 @@ def create_task(
         created_by_ref: Reference identifier for the creator.
         max_retries: Maximum retry attempts.
         requirement_id: Optional UUID of the linked requirement.
+        branch_name: Optional branch name to associate with the task.
         idempotency_key: Optional unique key for deduplication.
 
     Returns:
@@ -111,11 +113,12 @@ def create_task(
     # Validate and normalize the task type
     normalized_type = validate_task_type(task_type)
     logger.info(
-        "Task creation started: type=%s, created_by_type=%s, created_by_ref=%s, requirement_id=%s, has_idempotency_key=%s",
+        "Task creation started: type=%s, created_by_type=%s, created_by_ref=%s, requirement_id=%s, branch_name=%s, has_idempotency_key=%s",
         normalized_type,
         created_by_type,
         created_by_ref,
         requirement_id,
+        branch_name,
         idempotency_key is not None,
     )
 
@@ -126,6 +129,7 @@ def create_task(
         created_by_type=created_by_type,
         created_by_ref=created_by_ref,
         requirement_id=requirement_id,
+        branch_name=branch_name,
         idempotency_key=idempotency_key,
     )
 
@@ -254,6 +258,7 @@ def create_task_from_requirement(
     created_by_type: str,
     created_by_ref: str,
     max_retries: int = DEFAULT_TASK_MAX_RETRIES,
+    branch_name: str | None = None,
     idempotency_key: str | None = None,
 ) -> tuple[Requirement, Task]:
     """Atomically create a requirement and its initial planning task.
@@ -271,6 +276,7 @@ def create_task_from_requirement(
         created_by_type: Who created the task (user or agent).
         created_by_ref: Reference identifier for the creator.
         max_retries: Maximum retry attempts for the task.
+        branch_name: Optional branch name to associate with the task.
         idempotency_key: Optional unique key for task deduplication.
 
     Returns:
@@ -318,6 +324,7 @@ def create_task_from_requirement(
         created_by_type=created_by_type,
         created_by_ref=created_by_ref,
         requirement_id=requirement.id,
+        branch_name=branch_name,
         idempotency_key=idempotency_key,
     )
 

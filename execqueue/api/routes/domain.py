@@ -51,6 +51,7 @@ class TaskCreateRequest(BaseModel):
     created_by_type: Literal["user", "agent"]
     created_by_ref: str = Field(min_length=1, max_length=255)
     title: str | None = Field(None, min_length=1, max_length=255)
+    branch_name: str | None = Field(None, min_length=1, max_length=255)
     idempotency_key: str | None = Field(None, min_length=1, max_length=255)
 
 
@@ -186,6 +187,7 @@ async def create_task_endpoint(
                 created_by_type=payload.created_by_type,
                 created_by_ref=payload.created_by_ref,
                 max_retries=DEFAULT_TASK_MAX_RETRIES,
+                branch_name=payload.branch_name,
                 idempotency_key=payload.idempotency_key,
             )
             # Log success (AP 5: observability without sensitive content)
@@ -230,6 +232,7 @@ async def create_task_endpoint(
                 created_by_type=payload.created_by_type,
                 created_by_ref=payload.created_by_ref,
                 max_retries=DEFAULT_TASK_MAX_RETRIES,
+                branch_name=payload.branch_name,
                 idempotency_key=payload.idempotency_key,
             )
             # Log success (AP 5: observability without sensitive content)

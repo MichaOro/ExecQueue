@@ -320,6 +320,22 @@ def test_create_requirement_rejects_title_too_long(task_api_client):
     assert response.status_code == 422
 
 
+def test_create_task_rejects_branch_name_too_long(task_api_client):
+    """Task with an oversized branch_name should be rejected."""
+    response = task_api_client.post(
+        "/api/task",
+        json={
+            "prompt": "Test task",
+            "type": "planning",
+            "created_by_type": "user",
+            "created_by_ref": "telegram:123",
+            "branch_name": "x" * 256,
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_create_requirement_creates_requirement_and_task(task_api_client):
     """Requirement intake should create both Requirement and Planning task."""
     from execqueue.db.models import Requirement
@@ -355,6 +371,92 @@ def test_create_requirement_creates_requirement_and_task(task_api_client):
             assert req is not None
             assert req.description == "Implement user authentication"
             assert req.status == "draft"
+    finally:
+        if session:
+            session.close()
+
+
+def test_create_task_with_branch_name(task_api_client):
+    """Task creation should accept and store branch_name."""
+    from execqueue.db.models import Task
+
+    response = task_api_client.post(
+        "/api/task",
+        json={
+            "prompt": "Test task with branch",
+            "type": "planning",
+            "created_by_type": "user",
+            "created_by_ref": "telegram:123",
+            "branch_name": "feature/test-branch",
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["task_number"] == 1
+    assert data["status"] == "backlog"
+
+    # Verify Task was created with branch_name by querying the DB
+    session = None
+    try:
+        override_func = task_api_client.app.dependency_overrides.get(get_db_session)
+        if override_func:
+            session_gen = override_func()
+            session = next(session_gen)
+
+            # Check that a task with the given branch_name exists
+            task = session.execute(
+                select(Task).where(Task.branch_name == "feature/test-branch")
+            ).scalar_one_or_none()
+            assert task is not None
+            assert task.prompt == "Test task with branch"
+            assert task.type == "planning"
+    finally:
+        if session:
+            session.close()
+
+
+def test_create_requirement_with_branch_name(task_api_client):
+    """Requirement intake should accept and store branch_name."""
+    from execqueue.db.models import Requirement, Task
+
+    response = task_api_client.post(
+        "/api/task",
+        json={
+            "prompt": "Implement user authentication",
+            "type": "requirement",
+            "created_by_type": "user",
+            "created_by_ref": "telegram:789",
+            "title": "User Authentication Feature",
+            "branch_name": "feature/auth-branch",
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["task_number"] == 1
+    assert data["status"] == "backlog"
+
+    # Verify Requirement and Task were created with branch_name by querying the DB
+    session = None
+    try:
+        override_func = task_api_client.app.dependency_overrides.get(get_db_session)
+        if override_func:
+            session_gen = override_func()
+            session = next(session_gen)
+
+            # Check that a requirement with the given title exists
+            req = session.execute(
+                select(Requirement).where(Requirement.title == "User Authentication Feature")
+            ).scalar_one_or_none()
+            assert req is not None
+            
+            # Check that the associated task has the branch_name
+            task = session.execute(
+                select(Task).where(Task.requirement_id == req.id)
+            ).scalar_one_or_none()
+            assert task is not None
+            assert task.branch_name == "feature/auth-branch"
     finally:
         if session:
             session.close()
