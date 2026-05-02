@@ -7,6 +7,9 @@ the concrete endpoint instead of relying on global middleware or app state.
 """
 
 from __future__ import annotations
+from fastapi import BackgroundTasks
+from execqueue.orchestrator.main import Orchestrator
+from execqueue.db.session import create_session
 
 import logging
 from typing import Literal, NoReturn
@@ -136,9 +139,21 @@ def _raise_idempotency_conflict(idempotency_key: str) -> NoReturn:
         422: {"description": "Invalid task payload"},
     },
 )
+
+
+async def _run_orchestrator_background() -> None:
+    """Background helper to trigger orchestrator preparation cycle."""
+    session = create_session()
+    try:
+        orchestrator = Orchestrator()
+        orchestrator.run_preparation_cycle(session)
+    finally:
+        session.close()
+
 async def create_task_endpoint(
     payload: TaskCreateRequest,
     session: DatabaseSession,
+    background_tasks: BackgroundTasks,
 ) -> TaskCreateResponse:
     """Create a new task for later processing.
 
@@ -254,6 +269,7 @@ async def create_task_endpoint(
                 detail="Internal error during task creation",
             ) from exc
 
+    background_tasks.add_task(_run_orchestrator_background)
     return TaskCreateResponse(task_number=task.task_number, status=task.status)
 
 

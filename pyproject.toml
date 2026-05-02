@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.1",
+    "psutil>=5.9",
 ]
 
 [tool.setuptools.packages.find]
@@ -25,6 +26,7 @@ dev = [
     "httpx>=0.26",
     "uvicorn>=0.27",
     "ruff>=0.1",  # Linting for technical-requirements-engineer-task
+    "psutil>=5.9",  # used for PID conflict detection in telegram bot
 ]
 telegram = [
     "python-telegram-bot>=20.0",

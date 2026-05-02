@@ -1,6 +1,7 @@
 ﻿"""Telegram bot self-health reporting."""
 
 import asyncio
+import psutil  # Added for PID conflict detection
 import inspect
 import json
 import logging
@@ -146,6 +147,39 @@ async def _event_is_set(event: asyncio.Event) -> bool:
 
 
 def write_pid_file(pid: int | None = None) -> None:
+    """Persist the current bot PID for restart orchestration."""
+    pid_value = os.getpid() if pid is None else pid
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(f"{pid_value}\n", encoding="utf-8")
+
+# New helper to prevent concurrent bot instances
+def _already_running() -> bool:
+    """Check PID file and verify that the recorded process still exists.
+
+    Returns ``True`` if another bot instance appears to be running, in which
+    case the caller should abort start-up. ``False`` means it is safe to start.
+    """
+    if not PID_FILE.is_file():
+        return False
+    try:
+        recorded_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+    except ValueError:
+        # Corrupted file – remove it and allow start
+        PID_FILE.unlink(missing_ok=True)
+        return False
+    # Verify that the PID still belongs to a live process
+    if psutil.pid_exists(recorded_pid):
+        logger.error(
+            "Telegram bot appears to be already running (PID %s). "
+            "Terminate the existing process or delete %s before starting a new instance.",
+            recorded_pid,
+            PID_FILE,
+        )
+        return True
+    # Stale PID file – clean up
+    PID_FILE.unlink(missing_ok=True)
+    return False
+
     """Persist the current bot PID for restart orchestration."""
     pid_value = os.getpid() if pid is None else pid
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -532,6 +566,8 @@ async def run_bot() -> None:
             "Please install it with: pip install python-telegram-bot"
         )
         write_health_status("not_ok", "python-telegram-bot library not installed.")
+        # Abort if a stale bot instance might still be running
+        _already_running()
         sys.exit(1)
 
     logger.info("Starting Telegram bot with polling and health reporting...")
