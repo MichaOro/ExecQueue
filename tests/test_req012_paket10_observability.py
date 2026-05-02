@@ -29,6 +29,8 @@ from execqueue.observability import (
     get_metrics,
     log_phase_event,
     record_adoption_conflict,
+    record_cherry_pick_attempt,
+    record_cherry_pick_success,
     record_execution_claimed,
     record_execution_completed,
     record_execution_failed,
@@ -36,6 +38,12 @@ from execqueue.observability import (
     record_retry_exhausted,
     record_retry_scheduled,
     record_stale_detection,
+    record_validation_failed,
+    record_validation_passed,
+    record_validation_review,
+    record_worktree_cleaned,
+    record_worktree_created,
+    record_worktree_error,
     redact_payload,
     reset_metrics,
 )
@@ -362,6 +370,79 @@ class TestMetricsCollection:
 
         assert metrics.adoption_conflicts == 1
 
+    def test_record_worktree_metrics(self):
+        """Test recording worktree metrics."""
+        # Reset metrics first
+        reset_metrics()
+        
+        record_worktree_created()
+        record_worktree_created()
+        record_worktree_cleaned()
+        record_worktree_error()
+        
+        metrics = get_metrics()
+        assert metrics.worktrees_created == 2
+        assert metrics.worktrees_cleaned == 1
+        assert metrics.worktrees_errors == 1
+        
+        # Check the calculated worktree_count from to_dict
+        result = metrics.to_dict()
+        assert result["worktree_count"] == 0  # 2 created - 1 cleaned - 1 error = 0
+
+    def test_record_cherry_pick_metrics(self):
+        """Test recording cherry-pick metrics."""
+        # Reset metrics first
+        reset_metrics()
+        
+        record_cherry_pick_attempt()
+        record_cherry_pick_attempt()
+        record_cherry_pick_success()
+        
+        metrics = get_metrics()
+        assert metrics.cherry_pick_attempts == 2
+        assert metrics.cherry_pick_success == 1
+        assert metrics.cherry_pick_success_rate == 0.5
+
+    def test_record_validation_metrics(self):
+        """Test recording validation metrics."""
+        # Reset metrics first
+        reset_metrics()
+        
+        record_validation_passed()
+        record_validation_passed()
+        record_validation_failed()
+        record_validation_review()
+        
+        metrics = get_metrics()
+        assert metrics.validations_passed == 2
+        assert metrics.validations_failed == 1
+        assert metrics.validations_review == 1
+        assert metrics.validation_success_rate == 0.5  # 2 passed / (2+1+1) total
+
+    def test_cherry_pick_success_rate_edge_cases(self):
+        """Test cherry-pick success rate edge cases."""
+        # Reset metrics first
+        reset_metrics()
+        
+        # No attempts should result in 0.0 rate
+        metrics = get_metrics()
+        assert metrics.cherry_pick_success_rate == 0.0
+        
+        # Only successes
+        record_cherry_pick_attempt()
+        record_cherry_pick_success()
+        metrics = get_metrics()
+        assert metrics.cherry_pick_success_rate == 1.0
+
+    def test_validation_success_rate_edge_cases(self):
+        """Test validation success rate edge cases."""
+        # Reset metrics first
+        reset_metrics()
+        
+        # No validations should result in 0.0 rate
+        metrics = get_metrics()
+        assert metrics.validation_success_rate == 0.0
+
     def test_record_phase_duration(self):
         """Test recording phase duration."""
         record_phase_duration("dispatch", 5.5)
@@ -399,6 +480,12 @@ class TestMetricsCollection:
         record_execution_claimed()
         record_execution_completed()
         record_phase_duration("dispatch", 10.0)
+        
+        # Add some REQ-021 metrics
+        record_worktree_created()
+        record_cherry_pick_attempt()
+        record_cherry_pick_success()
+        record_validation_passed()
 
         metrics = get_metrics()
         result = metrics.to_dict()
@@ -407,6 +494,14 @@ class TestMetricsCollection:
         assert "success_rate" in result
         assert "average_phase_durations" in result
         assert "last_update" in result
+        
+        # Check REQ-021 metrics
+        assert "worktrees_created" in result
+        assert "cherry_pick_attempts" in result
+        assert "cherry_pick_success" in result
+        assert "cherry_pick_success_rate" in result
+        assert "validations_passed" in result
+        assert "validation_success_rate" in result
 
 
 # ============================================================================

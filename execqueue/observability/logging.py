@@ -19,9 +19,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Generator
 
-
 class RunnerPhase(str, Enum):
-    """Runner execution phases for observability."""
+    """Runner execution phases for observability.
+    
+    NOTE: This duplicates execqueue.runner.error_classification.RunnerPhase
+    to avoid circular imports. Changes must be synchronized manually.
+    """
 
     CLAIM = "claim"
     SESSION = "session"
@@ -333,6 +336,16 @@ class ExecutionMetrics:
     retries_exhausted: int = 0
     stale_executions_detected: int = 0
     adoption_conflicts: int = 0
+    
+    # REQ-021 Specific Metrics
+    worktrees_created: int = 0
+    worktrees_cleaned: int = 0
+    worktrees_errors: int = 0
+    cherry_pick_success: int = 0
+    cherry_pick_attempts: int = 0
+    validations_passed: int = 0
+    validations_failed: int = 0
+    validations_review: int = 0
 
     # Phase durations (accumulated)
     phase_durations: dict[str, float] = field(default_factory=dict)
@@ -371,6 +384,17 @@ class ExecutionMetrics:
             return 0.0
         return self.retries_scheduled / total
 
+    @property
+    def cherry_pick_success_rate(self) -> float:
+        """Calculate cherry-pick success rate."""
+        return (self.cherry_pick_success / self.cherry_pick_attempts) if self.cherry_pick_attempts else 0.0
+
+    @property
+    def validation_success_rate(self) -> float:
+        """Calculate validation success rate."""
+        total = self.validations_passed + self.validations_failed + self.validations_review
+        return (self.validations_passed / total) if total else 0.0
+
     def to_dict(self) -> dict:
         """Convert to dictionary representation."""
         return {
@@ -383,6 +407,20 @@ class ExecutionMetrics:
             "adoption_conflicts": self.adoption_conflicts,
             "success_rate": self.success_rate,
             "retry_rate": self.retry_rate,
+            
+            # REQ-021 Metrics
+            "worktrees_created": self.worktrees_created,
+            "worktrees_cleaned": self.worktrees_cleaned,
+            "worktrees_errors": self.worktrees_errors,
+            "worktree_count": self.worktrees_created - self.worktrees_cleaned - self.worktrees_errors,
+            "cherry_pick_attempts": self.cherry_pick_attempts,
+            "cherry_pick_success": self.cherry_pick_success,
+            "cherry_pick_success_rate": self.cherry_pick_success_rate,
+            "validations_passed": self.validations_passed,
+            "validations_failed": self.validations_failed,
+            "validations_review": self.validations_review,
+            "validation_success_rate": self.validation_success_rate,
+            
             "average_phase_durations": {
                 phase: self.get_average_phase_duration(phase)
                 for phase in set(self.phase_durations.keys())
@@ -448,6 +486,54 @@ def record_stale_detection():
 def record_adoption_conflict():
     """Record a commit adoption conflict."""
     _global_metrics.adoption_conflicts += 1
+    _global_metrics.last_update = datetime.now(timezone.utc)
+
+
+def record_worktree_created():
+    """Record a worktree creation."""
+    _global_metrics.worktrees_created += 1
+    _global_metrics.last_update = datetime.now(timezone.utc)
+
+
+def record_worktree_cleaned():
+    """Record a worktree cleanup."""
+    _global_metrics.worktrees_cleaned += 1
+    _global_metrics.last_update = datetime.now(timezone.utc)
+
+
+def record_worktree_error():
+    """Record a worktree error."""
+    _global_metrics.worktrees_errors += 1
+    _global_metrics.last_update = datetime.now(timezone.utc)
+
+
+def record_cherry_pick_attempt():
+    """Record a cherry-pick attempt."""
+    _global_metrics.cherry_pick_attempts += 1
+    _global_metrics.last_update = datetime.now(timezone.utc)
+
+
+def record_cherry_pick_success():
+    """Record a successful cherry-pick."""
+    _global_metrics.cherry_pick_success += 1
+    _global_metrics.last_update = datetime.now(timezone.utc)
+
+
+def record_validation_passed():
+    """Record a successful validation."""
+    _global_metrics.validations_passed += 1
+    _global_metrics.last_update = datetime.now(timezone.utc)
+
+
+def record_validation_failed():
+    """Record a failed validation."""
+    _global_metrics.validations_failed += 1
+    _global_metrics.last_update = datetime.now(timezone.utc)
+
+
+def record_validation_review():
+    """Record a validation requiring review."""
+    _global_metrics.validations_review += 1
     _global_metrics.last_update = datetime.now(timezone.utc)
 
 

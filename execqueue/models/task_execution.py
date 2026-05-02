@@ -82,6 +82,11 @@ class TaskExecution(Base):
             "'result_inspection', 'adopting_commit', 'review', 'done', 'failed')",
             name="ck_task_execution_status_allowed",
         ),
+        # REQ-021 Adoption status check constraint
+        CheckConstraint(
+            "adoption_status IN ('pending', 'in_progress', 'success', 'failed', 'review') OR adoption_status IS NULL",
+            name="ck_task_execution_adoption_status_allowed",
+        ),
         Index("ix_task_executions_task_id", "task_id"),
         Index("ix_task_executions_status", "status"),
         Index("ix_task_executions_runner_id", "runner_id"),
@@ -89,6 +94,7 @@ class TaskExecution(Base):
         Index("ix_task_executions_opencode_session_id", "opencode_session_id"),
         Index("ix_task_executions_updated_at", "updated_at"),
         Index("ix_task_executions_workflow_id", "workflow_id"),
+        Index("ix_task_executions_wf_task", "workflow_id", "task_id"),
         # Indexe für Stale-Erkennung (Paket 09)
         Index("ix_task_executions_heartbeat_at_status", "heartbeat_at", "status"),
         Index("ix_task_executions_updated_at_status", "updated_at", "status"),
@@ -99,6 +105,15 @@ class TaskExecution(Base):
             "task_id",
             unique=True,
             postgresql_where=text(f"status NOT IN {str(FINAL_EXECUTION_STATUSES)}"),
+        ),
+        # Unique Constraint für Idempotenz (REQ-016 Empfehlung 6)
+        # Verhindert Duplikate bei gleicher input_hash für abgeschlossene Executions
+        Index(
+            "ix_task_executions_unique_idempotent",
+            "task_id",
+            "input_hash",
+            unique=True,
+            postgresql_where=text("status = 'done' AND input_hash IS NOT NULL"),
         ),
     )
 
@@ -156,6 +171,13 @@ class TaskExecution(Base):
         JSON,
         nullable=True,
     )
+    # Idempotenz-Hash für REQ-016 Empfehlung 6
+    # Dedizierte Spalte für deterministischen Input-Hash
+    input_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
     branch_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     worktree_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     commit_sha_before: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -174,6 +196,17 @@ class TaskExecution(Base):
     )
     inspection_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     adopted_commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # REQ-021 Adoption tracking fields
+    adoption_status: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        comment="Adoption state: pending, in_progress, success, failed, review",
+    )
+    adoption_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Error message if adoption failed",
+    )
     # Token Usage Tracking (REQ-013)
     total_tokens: Mapped[int | None] = mapped_column(
         BigInteger,
@@ -244,6 +277,37 @@ class TaskExecution(Base):
         """Check if the execution is still active (not in final state)."""
         return self.status not in FINAL_EXECUTION_STATUSES
 
+    # REQ-021 Adoption lifecycle properties
+    @property
+    def is_adoption_pending(self) -> bool:
+        """Check if adoption is pending or not yet started."""
+        return self.adoption_status in (None, "pending")
+
+    @property
+    def is_adoption_in_progress(self) -> bool:
+        """Check if adoption is currently in progress."""
+        return self.adoption_status == "in_progress"
+
+    @property
+    def is_adoption_complete(self) -> bool:
+        """Check if adoption process is complete (success, failed, or review)."""
+        return self.adoption_status in ("success", "failed", "review")
+
+    @property
+    def is_adoption_successful(self) -> bool:
+        """Check if adoption succeeded."""
+        return self.adoption_status == "success"
+
+    @property
+    def is_adoption_failed(self) -> bool:
+        """Check if adoption failed."""
+        return self.adoption_status == "failed"
+
+    @property
+    def is_adoption_needs_review(self) -> bool:
+        """Check if adoption requires manual review."""
+        return self.adoption_status == "review"
+
     def to_dict(self) -> dict:
         """Convert execution to dictionary representation."""
         return {
@@ -264,6 +328,7 @@ class TaskExecution(Base):
             "error_type": self.error_type,
             "error_message": self.error_message,
             "result_summary": self.result_summary,
+            "input_hash": self.input_hash,
             "branch_name": self.branch_name,
             "worktree_path": self.worktree_path,
             "commit_sha_before": self.commit_sha_before,
@@ -274,6 +339,8 @@ class TaskExecution(Base):
             "has_uncommitted_changes": self.has_uncommitted_changes,
             "inspection_status": self.inspection_status,
             "adopted_commit_sha": self.adopted_commit_sha,
+            "adoption_status": self.adoption_status,
+            "adoption_error": self.adoption_error,
             "total_tokens": self.total_tokens,
             "next_retry_at": self.next_retry_at.isoformat() if self.next_retry_at else None,
             "phase": self.phase,

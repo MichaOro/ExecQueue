@@ -44,6 +44,9 @@ class WorkflowContext:
     """Runtime context for workflow execution.
 
     Used for crash recovery and state persistence.
+    
+    Lifecycle fields (started_at, finished_at, error_message) enable
+    detailed audit trails and crash recovery diagnostics.
     """
 
     workflow_id: UUID
@@ -52,12 +55,18 @@ class WorkflowContext:
     tasks: list[PreparedExecutionContext] = field(default_factory=list)
     dependencies: dict[UUID, list[UUID]] = field(default_factory=dict)
     created_at: datetime = field(default_factory=utcnow)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error_message: str | None = None
 
 
 class Workflow(Base):
     """Workflow table for orchestrator crash recovery.
 
     Tracks the state of workflow execution across restarts.
+    
+    Additional audit fields (started_at, finished_at, error_message) enable
+    detailed lifecycle tracking and crash recovery diagnostics.
     """
 
     __tablename__ = "workflow"
@@ -89,4 +98,17 @@ class Workflow(Base):
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
+    )
+    # Lifecycle audit fields for crash recovery and observability
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    error_message: Mapped[str | None] = mapped_column(
+        String(4096),  # Allow up to 4KB for detailed error messages
+        nullable=True,
     )

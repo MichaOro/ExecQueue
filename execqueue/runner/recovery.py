@@ -15,7 +15,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import git
+try:
+    import git
+    GITPYTHON_AVAILABLE = True
+except ImportError:
+    GITPYTHON_AVAILABLE = False
 from sqlalchemy.orm import Session
 
 from execqueue.models.enums import ExecutionStatus, EventType
@@ -322,7 +326,7 @@ class RecoveryService:
         for execution in stale_executions:
             try:
                 decision = self.handle_stale_execution(session, execution)
-                self._apply_recovery_decision(session, execution, decision)
+                self._apply_recovery_decision_no_commit(session, execution, decision)
                 processed += 1
                 logger.info(
                     f"Processed stale execution {execution.id}: {decision.action.value}"
@@ -333,15 +337,21 @@ class RecoveryService:
                     exc_info=True,
                 )
 
+        try:
+            session.commit()  # Einmaliger Commit am Ende
+        except Exception as e:
+            session.rollback()
+            logger.error("Failed to commit stale execution batch: %s", e, exc_info=True)
+        
         return processed
 
-    def _apply_recovery_decision(
+    def _apply_recovery_decision_no_commit(
         self,
         session: Session,
         execution: TaskExecution,
         decision: RecoveryDecision,
     ):
-        """Apply a recovery decision to an execution.
+        """Apply a recovery decision to an execution without committing.
 
         Args:
             session: Database session
@@ -351,7 +361,6 @@ class RecoveryService:
         # Create recovery event
         event_type = {
             RecoveryAction.RETRY: EventType.RETRY_SCHEDULED,
-            RecoveryAction.RETRY_EXHAUSTED: EventType.RETRY_EXHAUSTED,
             RecoveryAction.FAILED: EventType.EXECUTION_FAILED,
             RecoveryAction.REVIEW: EventType.EXECUTION_FAILED,
             RecoveryAction.REVALIDATE_ADOPTION: EventType.COMMIT_ADOPTION_CONFLICT,
@@ -368,6 +377,8 @@ class RecoveryService:
                 "reason": decision.reason,
                 "error_type": decision.error_type.value,
                 "phase": decision.phase.value,
+                "attempt": execution.attempt,
+                "max_attempts": execution.max_attempts,
             },
             correlation_id=execution.correlation_id,
         )
@@ -386,7 +397,7 @@ class RecoveryService:
             execution.next_retry_at = decision.next_retry_at
 
         session.add(execution)
-        session.commit()
+        # No commit here - caller handles batching
 
 
 # ============================================================================

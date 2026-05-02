@@ -176,7 +176,8 @@ class TestWorkflowContextBuilder:
             PreparedExecutionContext(task_id=task1_id, branch_name="main", worktree_path="/tmp", commit_sha=None),
             PreparedExecutionContext(task_id=task2_id, branch_name="main", worktree_path="/tmp", commit_sha=None),
         ]
-        ctx.dependencies = {task2_id: [task1_id]}
+        # Now validation requires all tasks to be in dependencies map
+        ctx.dependencies = {task1_id: [], task2_id: [task1_id]}
         
         errors = builder.validate_context(ctx)
         

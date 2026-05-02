@@ -49,6 +49,39 @@ class TestIdempotencyContext:
 
         assert ctx1.compute_input_hash() != ctx2.compute_input_hash()
 
+    def test_deterministic_params_affect_hash(self):
+        """Different model_version, temperature, or max_tokens produce different hashes."""
+        base = dict(
+            workflow_id=str(uuid4()),
+            task_id=uuid4(),
+            task_type="execution",
+            prompt="Prompt",
+            details={},
+            idempotency_key="idem-1",
+        )
+
+        ctx_default = IdempotencyContext(**base)
+        ctx_diff_model = IdempotencyContext(**{**base, "model_version": "gpt-4"})
+        ctx_diff_temp = IdempotencyContext(**{**base, "temperature": 0.7})
+        ctx_diff_tokens = IdempotencyContext(**{**base, "max_tokens": 2000})
+
+        h_default = ctx_default.compute_input_hash()
+        assert ctx_diff_model.compute_input_hash() != h_default
+        assert ctx_diff_temp.compute_input_hash() != h_default
+        assert ctx_diff_tokens.compute_input_hash() != h_default
+
+    def test_deterministic_params_are_optional(self):
+        """Hash still works when deterministic params are None."""
+        ctx = IdempotencyContext(
+            workflow_id=str(uuid4()),
+            task_id=uuid4(),
+            task_type="execution",
+            prompt="Prompt",
+            details={},
+            idempotency_key="idem-1",
+        )
+        assert len(ctx.compute_input_hash()) == 64
+
 
 class TestIdempotencyService:
     def test_detects_duplicate_execution(self, db_session):
@@ -69,6 +102,7 @@ class TestIdempotencyService:
             task_id=task_id,
             workflow_id=workflow_id,
             status=ExecutionStatus.DONE.value,
+            input_hash=ctx.compute_input_hash(),
             result_summary={
                 "input_hash": ctx.compute_input_hash(),
                 "idempotency_key": "idem-1",

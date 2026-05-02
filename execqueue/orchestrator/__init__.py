@@ -41,6 +41,15 @@ from execqueue.orchestrator.locking import TaskLocker
 from execqueue.orchestrator.git_context import GitContextPreparer
 from execqueue.orchestrator.context_contract import PreparedContextBuilder
 from execqueue.orchestrator.main import Orchestrator
+from execqueue.orchestrator.exceptions import (
+    OrchestratorError,
+    DependencyError,
+    CycleError,
+    ValidationError,
+    CandidateDiscoveryError,
+    LockingError,
+    ContextBuildingError,
+)
 from execqueue.orchestrator.models import (
     BatchPlan,
     BatchType,
@@ -90,6 +99,14 @@ __all__ = [
     "PreparationErrorType",
     "RunnerMode",
     "TaskClassification",
+    # Exception hierarchy
+    "OrchestratorError",
+    "DependencyError",
+    "CycleError",
+    "ValidationError",
+    "CandidateDiscoveryError",
+    "LockingError",
+    "ContextBuildingError",
 ]
 
 logger = logging.getLogger(__name__)

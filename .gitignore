@@ -67,7 +67,6 @@ Thumbs.db
 # Project-specific
 diff2.config.json
 ops/pids/*.pid
-/docs/*
 /logs/*
 
 # Health module runtime files

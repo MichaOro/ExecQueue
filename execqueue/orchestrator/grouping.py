@@ -5,6 +5,7 @@ Implements efficient grouping of tasks by requirement_id, epic_id, or as standal
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Literal
 from uuid import UUID, uuid4
@@ -12,6 +13,8 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 
 from execqueue.db.models import Task
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -59,14 +62,23 @@ class TaskGroupingEngine:
         
         for task in tasks:
             if task.requirement_id is None:
+                logger.debug(
+                    "Skipping task %s (no requirement_id)",
+                    task.id,
+                )
                 continue
             
             req_id = task.requirement_id
             if req_id not in groups:
+                logger.debug(
+                    "Creating new requirement group %s for task %s",
+                    req_id,
+                    task.id,
+                )
                 groups[req_id] = []
             groups[req_id].append(task)
         
-        return {
+        result = {
             req_id: TaskGroup(
                 group_id=req_id,
                 tasks=task_list,
@@ -75,6 +87,14 @@ class TaskGroupingEngine:
             )
             for req_id, task_list in groups.items()
         }
+        
+        logger.info(
+            "Grouped %d tasks into %d requirement groups",
+            len(tasks),
+            len(result),
+        )
+        
+        return result
     
     def group_by_epic(
         self,
@@ -89,22 +109,40 @@ class TaskGroupingEngine:
             Dictionary mapping epic_id to TaskGroup
         """
         groups: dict[UUID, list[Task]] = {}
+        skipped_no_epic = 0
+        skipped_invalid_epic = 0
         
         for task in tasks:
             epic_id_str = task.details.get("epic_id")
             if not epic_id_str:
+                skipped_no_epic += 1
+                logger.debug(
+                    "Skipping task %s (no epic_id in details)",
+                    task.id,
+                )
                 continue
             
             try:
                 epic_id = UUID(epic_id_str) if isinstance(epic_id_str, str) else epic_id_str
             except (ValueError, TypeError):
+                skipped_invalid_epic += 1
+                logger.warning(
+                    "Skipping task %s (invalid epic_id format: %s)",
+                    task.id,
+                    epic_id_str,
+                )
                 continue
             
             if epic_id not in groups:
+                logger.debug(
+                    "Creating new epic group %s for task %s",
+                    epic_id,
+                    task.id,
+                )
                 groups[epic_id] = []
             groups[epic_id].append(task)
         
-        return {
+        result = {
             epic_id: TaskGroup(
                 group_id=epic_id,
                 tasks=task_list,
@@ -113,6 +151,16 @@ class TaskGroupingEngine:
             )
             for epic_id, task_list in groups.items()
         }
+        
+        logger.info(
+            "Grouped %d tasks into %d epic groups (skipped: %d no epic, %d invalid)",
+            len(tasks),
+            len(result),
+            skipped_no_epic,
+            skipped_invalid_epic,
+        )
+        
+        return result
     
     def group_standalone(
         self,
@@ -132,18 +180,37 @@ class TaskGroupingEngine:
         
         for task in tasks:
             if task.requirement_id is not None:
+                logger.debug(
+                    "Skipping task %s (already has requirement_id)",
+                    task.id,
+                )
                 continue
             
             epic_id_str = task.details.get("epic_id")
             if epic_id_str:
+                logger.debug(
+                    "Skipping task %s (already has epic_id)",
+                    task.id,
+                )
                 continue
             
             group_id = uuid4()
+            logger.debug(
+                "Creating standalone group %s for task %s",
+                group_id,
+                task.id,
+            )
             groups.append(TaskGroup(
                 group_id=group_id,
                 tasks=[task],
                 group_type="standalone",
             ))
+        
+        logger.info(
+            "Created %d standalone groups from %d tasks",
+            len(groups),
+            len(tasks),
+        )
         
         return groups
     
@@ -163,6 +230,11 @@ class TaskGroupingEngine:
         Returns:
             List of TaskGroup
         """
+        logger.info(
+            "Starting task grouping for %d candidates",
+            len(candidates),
+        )
+        
         all_groups: list[TaskGroup] = []
         
         # Step 1: Group by requirement_id
@@ -177,6 +249,10 @@ class TaskGroupingEngine:
         
         # Step 2: Group remaining tasks by epic_id
         remaining_for_epic = [t for t in candidates if t.id not in grouped_task_ids]
+        logger.debug(
+            "Grouping %d remaining tasks by epic_id",
+            len(remaining_for_epic),
+        )
         epic_groups = self.group_by_epic(remaining_for_epic)
         all_groups.extend(epic_groups.values())
         
@@ -187,7 +263,18 @@ class TaskGroupingEngine:
         
         # Step 3: Group remaining as standalone
         remaining_standalone = [t for t in candidates if t.id not in grouped_task_ids]
+        logger.debug(
+            "Grouping %d remaining tasks as standalone",
+            len(remaining_standalone),
+        )
         standalone_groups = self.group_standalone(remaining_standalone)
         all_groups.extend(standalone_groups)
+        
+        logger.info(
+            "Task grouping complete: %d requirement groups, %d epic groups, %d standalone groups",
+            len(requirement_groups),
+            len(epic_groups),
+            len(standalone_groups),
+        )
         
         return all_groups

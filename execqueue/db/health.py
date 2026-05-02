@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from execqueue.db.session import create_session
-from execqueue.health.models import HealthCheckResult
+from execqueue.health.models import HealthCheckResult, HealthStatus
 
 
 def get_database_healthcheck() -> HealthCheckResult:
@@ -16,13 +16,13 @@ def get_database_healthcheck() -> HealthCheckResult:
     except ValueError:
         return HealthCheckResult(
             component="database",
-            status="DEGRADED",
+            status=HealthStatus.DEGRADED,
             detail="Database health check is not fully configured.",
         )
     except Exception:
         return HealthCheckResult(
             component="database",
-            status="DEGRADED",
+            status=HealthStatus.DEGRADED,
             detail="Database health check could not initialize its database driver.",
         )
 
@@ -30,19 +30,19 @@ def get_database_healthcheck() -> HealthCheckResult:
         session.execute(text("SELECT 1"))
         return HealthCheckResult(
             component="database",
-            status="OK",
+            status=HealthStatus.OK,
             detail="Database connectivity check succeeded.",
         )
     except SQLAlchemyError:
         return HealthCheckResult(
             component="database",
-            status="DEGRADED",
+            status=HealthStatus.DEGRADED,
             detail="Database connectivity check failed.",
         )
     except Exception:
         return HealthCheckResult(
             component="database",
-            status="DEGRADED",
+            status=HealthStatus.DEGRADED,
             detail="Database health check encountered an unexpected error.",
         )
     finally:

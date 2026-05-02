@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from execqueue.health.models import HealthCheckResult
+from execqueue.health.models import HealthCheckResult, HealthStatus
 
 # Path to bot's health file
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -24,7 +24,7 @@ def get_telegram_bot_healthcheck() -> HealthCheckResult:
     if not HEALTH_FILE.exists():
         return HealthCheckResult(
             component="telegram_bot",
-            status="ERROR",
+            status=HealthStatus.ERROR,
             detail="Bot health file not found. Bot may not be running or health reporting not configured.",
         )
     
@@ -45,7 +45,7 @@ def get_telegram_bot_healthcheck() -> HealthCheckResult:
                 if age > HEALTH_STALE_THRESHOLD:
                     return HealthCheckResult(
                         component="telegram_bot",
-                        status="ERROR",
+                        status=HealthStatus.ERROR,
                         detail=f"Bot health status is stale ({int(age)}s old). Bot may have crashed.",
                     )
             except (ValueError, TypeError):
@@ -71,12 +71,12 @@ def get_telegram_bot_healthcheck() -> HealthCheckResult:
     except json.JSONDecodeError as e:
         return HealthCheckResult(
             component="telegram_bot",
-            status="ERROR",
+            status=HealthStatus.ERROR,
             detail=f"Bot health file contains invalid JSON: {e}",
         )
     except Exception as e:
         return HealthCheckResult(
             component="telegram_bot",
-            status="ERROR",
+            status=HealthStatus.ERROR,
             detail=f"Failed to read bot health: {e}",
         )

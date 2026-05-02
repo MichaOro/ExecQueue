@@ -57,6 +57,7 @@ class WorkflowRepository:
         session: Session,
         workflow_id: UUID,
         new_status: "WorkflowStatus",
+        error_message: str | None = None,
     ) -> None:
         from execqueue.orchestrator.workflow_models import Workflow
 
@@ -64,6 +65,11 @@ class WorkflowRepository:
         if not wf:
             raise ValueError(f"Workflow {workflow_id} not found")
         wf.status = new_status.value
+        
+        # Speichere die Fehlermeldung, falls bereitgestellt
+        if error_message is not None:
+            wf.error_message = error_message
+            
         session.commit()
 
     def set_runner_uuid(
