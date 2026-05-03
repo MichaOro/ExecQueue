@@ -38,7 +38,7 @@ class RunnerManager:
         self._workflow_to_runner: Dict[uuid.UUID, RunnerHandle] = {}
         self._runner_to_workflow: Dict[str, uuid.UUID] = {}
     
-    async def start_runner_for_context(
+    def start_runner_for_context(
         self,
         ctx: WorkflowContext,
         runner_class: type | None = None,

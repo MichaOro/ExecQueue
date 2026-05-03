@@ -49,6 +49,28 @@ class WorkflowContextBuilder:
     def __init__(self):
         """Initialize the context builder."""
         pass
+
+    def _to_workflow_prepared_context(
+        self,
+        prepared_task: Any,
+    ) -> PreparedExecutionContext:
+        """Normalize arbitrary prepared task objects to workflow context items.
+
+        The orchestrator preparation phase currently produces a richer
+        REQ-011 PreparedExecutionContext with ``commit_sha_before``, while the
+        workflow runner expects the slimmer REQ-015 context with ``commit_sha``.
+        This adapter keeps the workflow handoff stable across both models.
+        """
+        commit_sha = getattr(prepared_task, "commit_sha", None)
+        if commit_sha is None:
+            commit_sha = getattr(prepared_task, "commit_sha_before", None)
+
+        return PreparedExecutionContext(
+            task_id=prepared_task.task_id,
+            branch_name=getattr(prepared_task, "branch_name", "") or "",
+            worktree_path=getattr(prepared_task, "worktree_path", "") or "",
+            commit_sha=commit_sha,
+        )
     
     def extract_dependencies(
         self,
@@ -337,7 +359,10 @@ class WorkflowContextBuilder:
         
         # Use provided prepared tasks or create placeholders
         if prepared_tasks is not None:
-            tasks = prepared_tasks
+            tasks = [
+                self._to_workflow_prepared_context(task)
+                for task in prepared_tasks
+            ]
         else:
             # Create placeholder contexts for each task
             tasks = [

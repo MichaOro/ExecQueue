@@ -5,9 +5,18 @@ from __future__ import annotations
 import pytest
 import asyncio
 from uuid import uuid4
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from execqueue.orchestrator.workflow_models import WorkflowContext, PreparedExecutionContext
+from execqueue.orchestrator.workflow_models import Workflow, WorkflowStatus
 from execqueue.runner.workflow_runner import WorkflowRunner
+from execqueue.db.base import Base
+from execqueue.db.models import Task, TaskStatus
+from execqueue.models.task_execution import TaskExecution
+from execqueue.models.task_execution_event import TaskExecutionEvent
+from execqueue.db import session as db_session_module
+from execqueue.runner import workflow_runner as workflow_runner_module
 
 
 class TestWorkflowRunner:
@@ -340,7 +349,7 @@ class TestWorkflowRunnerIntegration:
         )
         
         # Start runner via manager
-        handle = await manager.start_runner_for_context(
+        handle = manager.start_runner_for_context(
             ctx,
             runner_class=WorkflowRunner,
         )
@@ -385,7 +394,7 @@ class TestWorkflowRunnerIntegration:
         # Start all runners
         handles = []
         for ctx in workflows:
-            handle = await manager.start_runner_for_context(
+            handle = manager.start_runner_for_context(
                 ctx,
                 runner_class=WorkflowRunner,
             )
@@ -399,3 +408,88 @@ class TestWorkflowRunnerIntegration:
         
         # All should be done
         assert manager.get_active_count() == 3  # Still tracked, just not running
+
+    @pytest.mark.asyncio
+    async def test_standalone_mock_persists_execution_state(self, monkeypatch):
+        """Standalone mock path should create execution rows and finish the workflow."""
+        engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(engine)
+        SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+
+        workflow_id = uuid4()
+        task_id = uuid4()
+
+        seed_session = SessionLocal()
+        workflow = Workflow(id=workflow_id, status=WorkflowStatus.RUNNING.value)
+        task = Task(
+            id=task_id,
+            task_number=1,
+            title="Task 1",
+            prompt="Test prompt",
+            type="execution",
+            status=TaskStatus.PREPARED.value,
+            max_retries=3,
+            created_by_type="agent",
+            created_by_ref="test",
+            workflow_id=workflow_id,
+            batch_id=str(workflow_id),
+            details={},
+        )
+        seed_session.add(workflow)
+        seed_session.add(task)
+        seed_session.commit()
+        seed_session.close()
+
+        monkeypatch.setattr(
+            db_session_module,
+            "create_session",
+            lambda settings=None: SessionLocal(),
+        )
+        monkeypatch.setattr(
+            workflow_runner_module,
+            "create_session",
+            lambda: SessionLocal(),
+        )
+
+        ctx = WorkflowContext(
+            workflow_id=workflow_id,
+            epic_id=None,
+            requirement_id=None,
+            tasks=[
+                PreparedExecutionContext(
+                    task_id=task_id,
+                    branch_name="feature/test",
+                    worktree_path="/tmp/worktree/1",
+                    commit_sha=None,
+                )
+            ],
+            dependencies={task_id: []},
+        )
+
+        runner = WorkflowRunner(ctx=ctx, runner_uuid=str(uuid4()))
+        results = await runner.run()
+
+        assert len(results) == 1
+        assert results[0].status == "DONE"
+
+        verify_session = SessionLocal()
+        try:
+            persisted_task = verify_session.get(Task, task_id)
+            persisted_workflow = verify_session.get(Workflow, workflow_id)
+            executions = verify_session.query(TaskExecution).filter(TaskExecution.task_id == task_id).all()
+            events = verify_session.query(TaskExecutionEvent).join(
+                TaskExecution,
+                TaskExecutionEvent.task_execution_id == TaskExecution.id,
+            ).filter(TaskExecution.task_id == task_id).order_by(TaskExecutionEvent.sequence).all()
+
+            assert persisted_task is not None
+            assert persisted_task.status == TaskStatus.COMPLETED.value
+            assert persisted_workflow is not None
+            assert persisted_workflow.status == WorkflowStatus.DONE.value
+            assert len(executions) == 1
+            assert executions[0].status == "done"
+            assert len(events) == 2
+            assert events[0].event_type == "execution.claimed"
+            assert events[1].event_type == "status_update"
+        finally:
+            verify_session.close()

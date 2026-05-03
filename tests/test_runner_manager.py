@@ -56,7 +56,7 @@ class TestRunnerManager:
             dependencies={},
         )
         
-        handle = await manager.start_runner_for_context(ctx)
+        handle = manager.start_runner_for_context(ctx)
         
         assert handle.runner_uuid is not None
         assert handle.workflow_id == ctx.workflow_id
@@ -78,7 +78,7 @@ class TestRunnerManager:
             dependencies={},
         )
         
-        handle = await manager.start_runner_for_context(ctx, runner_class=MockRunner)
+        handle = manager.start_runner_for_context(ctx, runner_class=MockRunner)
         
         assert handle.runner_uuid is not None
         assert handle.workflow_id == ctx.workflow_id
@@ -119,7 +119,7 @@ class TestRunnerManager:
             dependencies={},
         )
         
-        handle = await manager.start_runner_for_context(ctx)
+        handle = manager.start_runner_for_context(ctx)
         runner_uuid = handle.runner_uuid
         workflow_id = ctx.workflow_id
         
@@ -160,8 +160,8 @@ class TestRunnerManager:
             dependencies={},
         )
         
-        handle1 = await manager.start_runner_for_context(ctx1)
-        handle2 = await manager.start_runner_for_context(ctx2)
+        handle1 = manager.start_runner_for_context(ctx1)
+        handle2 = manager.start_runner_for_context(ctx2)
         
         handles = manager.get_all_handles()
         
@@ -190,10 +190,10 @@ class TestRunnerManager:
         
         assert manager.get_active_count() == 0
         
-        await manager.start_runner_for_context(ctx1)
+        manager.start_runner_for_context(ctx1)
         assert manager.get_active_count() == 1
         
-        await manager.start_runner_for_context(ctx2)
+        manager.start_runner_for_context(ctx2)
         assert manager.get_active_count() == 2
         
         # Stop one
@@ -213,7 +213,7 @@ class TestRunnerManager:
             dependencies={},
         )
         
-        handle = await manager.start_runner_for_context(ctx)
+        handle = manager.start_runner_for_context(ctx)
         
         assert handle.task is not None
         assert isinstance(handle.task, asyncio.Task)

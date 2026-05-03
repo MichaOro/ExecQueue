@@ -17,7 +17,11 @@ import time
 from typing import TYPE_CHECKING
 
 from execqueue.orchestrator.workflow_models import WorkflowContext, WorkflowStatus
+from execqueue.db.models import Task
+from execqueue.runner.claim import ClaimFailedError, claim_task
 from execqueue.runner.graph import DependencyGraph
+from execqueue.runner.result_handler import ResultHandler
+from execqueue.db.session import create_session
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -245,16 +249,50 @@ class WorkflowRunner:
         await asyncio.sleep(0)
         
         from execqueue.runner.workflow_executor import TaskResult
-        
-        return [
-            TaskResult(
-                task_id=task_id,
-                status="DONE",
-                worktree_path=task_ctx.worktree_path,
-                commit_sha=task_ctx.commit_sha,
-                duration_seconds=0.0,
+
+        commit_sha = getattr(task_ctx, "commit_sha", None)
+        if commit_sha is None:
+            commit_sha = getattr(task_ctx, "commit_sha_before", None)
+
+        result = TaskResult(
+            task_id=task_id,
+            status="DONE",
+            worktree_path=task_ctx.worktree_path,
+            commit_sha=commit_sha,
+            duration_seconds=0.0,
+        )
+
+        session = create_session()
+        try:
+            task_exists = session.get(Task, task_id) is not None
+            if not task_exists:
+                logger.info(
+                    "Standalone mock execution has no persisted task for %s; "
+                    "returning in-memory result only",
+                    task_id,
+                )
+                return [result]
+
+            try:
+                claim_task(session, task_id, self.runner_uuid)
+                session.commit()
+            except ClaimFailedError:
+                session.rollback()
+                logger.warning(
+                    "Standalone mock execution could not claim task %s for runner %s",
+                    task_id,
+                    self.runner_uuid,
+                )
+                raise
+
+            ResultHandler(session).persist_results(
+                self._workflow_id,
+                [result],
             )
-        ]
+        finally:
+            session.close()
+
+        return [result]
 
     async def _execute_with_graph(self) -> list[TaskResult]:
         """Execute multi-task workflow with dependency graph.

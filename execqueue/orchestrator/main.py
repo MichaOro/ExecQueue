@@ -261,11 +261,9 @@ class Orchestrator:
                     )
                     
                     # Start WorkflowRunner with actual implementation
-                    handle = asyncio.run(
-                        self.runner_manager.start_runner_for_context(
-                            runner_ctx,
-                            runner_class=WorkflowRunner,
-                        )
+                    handle = self.runner_manager.start_runner_for_context(
+                        runner_ctx,
+                        runner_class=WorkflowRunner,
                     )
 
                     # Step 6: Store runner_uuid in workflow
@@ -337,7 +335,8 @@ class Orchestrator:
             logger.warning("Workflow recovery failed: %s", e)
             # Return early - no workflows to recover
             return
-            
+
+        try:
             for wf in running:
                 # Check if runner already exists
                 if wf.runner_uuid:
@@ -356,9 +355,9 @@ class Orchestrator:
                             wf.id,
                         )
                         continue
-                
+
                 tasks = session.query(Task).filter(Task.workflow_id == wf.id).all()
-                
+
                 if not tasks:
                     # No tasks found, mark workflow as done
                     logger.warning(
@@ -369,14 +368,14 @@ class Orchestrator:
                         session, wf.id, WorkflowStatus.DONE
                     )
                     continue
-                
+
                 # Filter out completed tasks
                 completed_statuses = {TaskStatus.COMPLETED.value}
                 pending_tasks = [
                     t for t in tasks
                     if t.status not in completed_statuses
                 ]
-                
+
                 if not pending_tasks:
                     # All tasks done, mark workflow as done
                     logger.info(
@@ -387,7 +386,7 @@ class Orchestrator:
                         session, wf.id, WorkflowStatus.DONE
                     )
                     continue
-                
+
                 # Rebuild group and context
                 group = TaskGroup(
                     group_id=wf.id,
@@ -396,11 +395,11 @@ class Orchestrator:
                     epic_id=wf.epic_id,
                     requirement_id=wf.requirement_id,
                 )
-                
+
                 wf_ctx = self.workflow_builder.build_context(group)
-                
+
                 # Start new WorkflowRunner
-                handle = await self.runner_manager.start_runner_for_context(
+                handle = self.runner_manager.start_runner_for_context(
                     wf_ctx,
                     runner_class=WorkflowRunner,
                 )
@@ -412,7 +411,6 @@ class Orchestrator:
                     handle.runner_uuid,
                     wf.id,
                 )
-        
         except Exception as e:
             logger.error("Workflow recovery failed: %s", e, exc_info=True)
     

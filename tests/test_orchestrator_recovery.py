@@ -92,7 +92,7 @@ class TestCrashRecovery:
 
         started_contexts = []
 
-        async def fake_start_runner(ctx, runner_class=None):
+        def fake_start_runner(ctx, runner_class=None):
             started_contexts.append(ctx)
             return RunnerHandle(runner_uuid="runner-new", workflow_id=ctx.workflow_id, task=None)
 
@@ -121,7 +121,7 @@ class TestCrashRecovery:
 
         started = False
 
-        async def fake_start_runner(ctx, runner_class=None):
+        def fake_start_runner(ctx, runner_class=None):
             nonlocal started
             started = True
             return RunnerHandle(runner_uuid="unexpected", workflow_id=ctx.workflow_id, task=None)
