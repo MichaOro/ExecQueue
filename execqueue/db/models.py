@@ -209,6 +209,10 @@ class Task(Base):
             name="ck_task_created_by_type_allowed",
         ),
         CheckConstraint(
+            "status IN ('backlog', 'queued', 'prepared', 'in_progress', 'completed', 'failed')",
+            name="ck_task_status_allowed",
+        ),
+        CheckConstraint(
             "type IN ('planning', 'execution', 'analysis', 'requirement')",
             name="ck_task_type_allowed",
         ),

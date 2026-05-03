@@ -12,6 +12,9 @@ from execqueue.db.runtime import get_database_url
 from execqueue.settings import get_settings
 
 import execqueue.db.models  # noqa: F401  Ensures model metadata is registered.
+import execqueue.models.execution_plan  # noqa: F401  Ensures model metadata is registered.
+import execqueue.models.task_dependency  # noqa: F401  Ensures model metadata is registered.
+import execqueue.orchestrator.distributed_lock  # noqa: F401  Ensures model metadata is registered.
 import execqueue.orchestrator.workflow_models  # noqa: F401  Ensures Workflow model metadata is registered.
 
 config = context.config

@@ -1,0 +1,90 @@
+@startuml
+skinparam partition {
+  BackgroundColor #EFEFEF
+  BorderColor #777777
+  FontColor #111111
+}
+
+start
+
+:Benutzer sendet /create Befehl;
+
+partition "Telegram Bot" {
+  :Zeige Auswahl des Aufgabentyps (Inline-Keyboard);
+  note right: CREATE_TASK_TYPE state
+}
+
+partition "API Intake" {
+  if (Aufgabentyp = Requirement?) then (ja)
+    :Frage nach Anforderungs‑Titel;
+    note right: CREATE_TITLE state
+    :Benutzer gibt Titel ein;
+    :Speichere Titel;
+    :Frage nach Prompt/Inhalt;
+    note right: CREATE_PROMPT state
+    :Benutzer gibt Prompt ein;
+    :Speichere Prompt;
+    :Zeige Branch‑Auswahl (bestehend / neu);
+    note right: BRANCH_CHOICE state
+    if (Existierenden auswählen?) then (bestehend)
+      :Liste vorhandener Branches (Keyboard);
+      note right: BRANCH_SELECT state
+      :Benutzer wählt Branch oder "0" für aktuellen;
+      :Speichere ausgewählten Branch;
+    else (neu)
+      :Frage nach neuem Branch‑Namen;
+      note right: BRANCH_NAME state
+      :Benutzer gibt Branch‑Namen ein;
+      :Validiere und erstelle Branch;
+      if (Erstellung erfolgreich?) then (ja)
+        :Bestätige Branch‑Erstellung;
+        :Speichere Branch;
+      else (nein)
+        :Fehler melden und abbrechen;
+        stop
+      endif
+    endif
+  else (nein - Planning/Execution/Analysis)
+    :Frage nach Prompt/Inhalt;
+    note right: CREATE_PROMPT state
+    :Benutzer gibt Prompt ein;
+    :Speichere Prompt;
+    :Ermittele aktuellen Git‑Branch;
+    :Speichere Branch;
+  endif
+
+  :Zeige Bestätigungs‑Zusammenfassung mit Ja/Nein‑Buttons;
+  note right: CONFIRMATION state
+  if (Benutzer bestätigt?) then (ja)
+    :Führe Task‑Erstellung über API aus;
+    :Gib Ergebnis zurück (Erfolg/Fehler);
+  else (nein)
+    :Erstellung abgebrochen;
+  endif
+}
+
+partition "Orchestrator – Workflow Management" {
+  :Orchestrator‑Trigger empfängt Signal (nach erfolgreicher DB‑Persistenz);
+  :Orchestrator-Instanz initialisieren (worker_id, Batch‑Größe, Pfade);
+  :Start Vorbereitung‑Zyklus (run_preparation_cycle);
+  :Erwerbe verteilten Lock (ORCHESTRATOR_LOCK_KEY);
+  if (Lock erhalten?) then (ja)
+    :Kandidaten entdecken (CandidateDiscovery.find_candidates);
+    note right: Priorität wird aus task.details["priority"] gezogen und absteigend sortiert
+    :Aufgaben gruppieren (TaskGroupingEngine.create_groups);
+    :Für jede Gruppe:
+    - Klassifizieren (TaskClassifier.classify) → read/write, parallel, Konflikt‑Key;
+    - Batch‑Planung (BatchPlanner.create_batch_plan) → Batch‑Priorität, Größe;
+    - Atomare Sperre setzen (TaskLocker.lock_tasks) → Status → QUEUED;
+    - Git‑Kontext vorbereiten (GitContextPreparer) → Worktree/Branch anlegen;
+    - Ausführungs‑Kontext bauen (PreparedContextBuilder) → PreparedExecutionContext;
+    - Workflow‑Zustand persistieren (WorkflowRepository.save);
+    - Runner starten (RunnerManager.start_runner) → Ausführung in Hintergrund;
+  else (nein)
+    :Log‑Warnung, kein Lock → Zyklus wird übersprungen;
+  endif
+  :Lock freigeben, Ergebnis‑Log schreiben;
+}
+
+stop
+@enduml

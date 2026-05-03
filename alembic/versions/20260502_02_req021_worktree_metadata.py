@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "20260502_02_req021_worktree_metadata"
-down_revision = "20260502_01_req021_adoption_tracking"
+revision = "20260502_02_req021_wtmeta"
+down_revision = "20260502_01_req021_adopttrk"
 branch_labels = None
 depends_on = None
 
